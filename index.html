@@ -91,7 +91,7 @@ label.f{display:block;font-size:12px;color:var(--mut);margin-bottom:10px}label.f
 .setchips{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0;align-items:center}
 /* series del ejercicio */
 .blockB{overflow:auto;min-height:0;max-height:68dvh;align-self:end}
-.shead,.srow{display:grid;grid-template-columns:26px 1fr 1fr 1fr 46px;gap:6px;align-items:center}
+.shead,.srow{display:grid;grid-template-columns:26px 1fr 1fr 1fr 46px 40px;gap:6px;align-items:center}
 .shead{font-size:11px;color:var(--mut);text-align:center;margin-top:4px}
 .sblock{margin-top:6px}
 .srow input{text-align:center;font-size:19px;font-weight:800;padding:8px 2px;min-width:0}
@@ -175,7 +175,7 @@ input[type=checkbox]{width:22px;height:22px;padding:0;accent-color:var(--g);flex
 .res small{display:block}
 .infotxt{white-space:pre-line;font-size:15px;line-height:1.5}
 details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120px;overflow:auto}
-#toast{position:fixed;left:50%;bottom:calc(var(--nav) + 18px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#16241d;border:1px solid var(--g2);color:var(--txt);padding:10px 16px;border-radius:12px;z-index:90;font-weight:600;max-width:90%;display:none}
+#toast{position:fixed;left:50%;bottom:calc(var(--nav) + 18px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#16241d;border:1px solid var(--g2);color:var(--txt);padding:10px 12px;border-radius:12px;z-index:90;font-weight:600;max-width:92%;display:none}.toastin{display:flex;align-items:center;gap:10px}.toastundo{border:1px solid var(--g);background:#0e231a;color:var(--g);border-radius:9px;padding:5px 8px;font-weight:800;white-space:nowrap}
 #toast.err{border-color:var(--bad);background:#2a1417}
 #toast.soft{border-color:#6b5a2a;background:#1a1810;color:#f1e6c4;font-weight:500;font-size:14px;line-height:1.35}
 /* escáner de códigos de barras */
@@ -427,6 +427,7 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
       <input id="exReps" type="hidden" value="10">
       <label class="f">RIR obj.<input id="exRir" inputmode="numeric" value="2"></label>
     </div>
+    <div id="exSeriesCfg"></div>
     <button class="btn pri big" type="submit">Guardar ejercicio</button>
   </form>
 </div></div>
@@ -469,6 +470,7 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
       <input id="axReps" type="hidden" value="10">
       <label class="f">RIR obj.<input id="axRir" inputmode="numeric" value="2"></label>
     </div>
+    <div id="axSeriesCfg"></div>
     <button class="btn pri big" type="submit">Crear y añadir al entreno</button>
   </form>
 </div></div>
@@ -534,11 +536,17 @@ const num = v => { const x = parseFloat(String(v).replace(',', '.')); return isN
 const dLabel = s => { const d = parseDate(s); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
  
 let toastT;
-function toast(msg, err) {
-  const t = $('#toast'); t.textContent = msg; t.className = err === 'soft' ? 'soft' : err ? 'err' : ''; t.style.display = 'block';
+let undoAction = null;
+function toast(msg, err, undo) {
+  const t = $('#toast'); t.innerHTML = `<div class="toastin"><span>${esc(String(msg))}</span>${undo ? '<button class="toastundo" data-act="undo">🔄 Deshacer</button>' : ''}</div>`; undoAction = undo || null; t.className = err === 'soft' ? 'soft' : err ? 'err' : ''; t.style.display = 'block';
   clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', err === 'soft' ? 4800 : 2400);   // 'soft' = aviso suave, no bloqueante
 }
 const MODE = { local: false };
+const MEAL_COLL_KEY = 'nutrifit.mealsCollapsed';
+let mealCollMem = null;
+function mealCollapsed() { if (mealCollMem) return mealCollMem; try { mealCollMem = JSON.parse(localStorage.getItem(MEAL_COLL_KEY)) || {}; } catch (e) { mealCollMem = {}; } return mealCollMem; }
+function isMealCollapsed(k) { return !!mealCollapsed()[k]; }
+function toggleMeal(k) { const m = mealCollapsed(); m[k] = !m[k]; try { localStorage.setItem(MEAL_COLL_KEY, JSON.stringify(m)); } catch (e) {} renderNutri(); }
 const OFF_TIMEOUT_MS = 3500;
 async function fetchOpenFoodFactsUrl(url, options = {}) {
   const controller = new AbortController();
@@ -858,11 +866,17 @@ const S = {
  
 /* ================= motor de sobrecarga progresiva ================= */
 const e1rm = (kg, reps, rir) => kg * (1 + (reps + rir) / 30);          // Epley (1985) con RIR
+const SERIES_TARGETS_KEY = 'nutrifit.seriesTargets.v1';
+function seriesTargets(ex) { let all = {}; try { all = JSON.parse(localStorage.getItem(SERIES_TARGETS_KEY)) || {}; } catch (e) {} const a = all[ex.id] || {}; return { reps: Array.from({ length: ex.sets }, (_, i) => +(a.reps?.[i] || ex.target_reps)), rir: Array.from({ length: ex.sets }, (_, i) => +(a.rir?.[i] ?? ex.target_rir)) }; }
+function saveSeriesTargets(id, reps, rir) { let all = {}; try { all = JSON.parse(localStorage.getItem(SERIES_TARGETS_KEY)) || {}; } catch (e) {} all[id] = { reps, rir }; try { localStorage.setItem(SERIES_TARGETS_KEY, JSON.stringify(all)); } catch (e) {} }
+function renderSeriesCfg(prefix, sets, reps = [], rir = []) { const box = $('#' + prefix + 'SeriesCfg'); if (!box) return; box.innerHTML = `<div class="mut" style="font-size:12px;margin:4px 0">Objetivo específico por serie</div>${Array.from({ length: Math.max(1, Math.min(12, +sets || 1)) }, (_, i) => `<div class="row" style="margin-bottom:5px"><small style="width:58px;flex:none">Serie ${i + 1}</small><input data-sercfg="reps" data-i="${i}" inputmode="numeric" placeholder="Reps" value="${reps[i] ?? 10}"><input data-sercfg="rir" data-i="${i}" inputmode="numeric" placeholder="RIR" value="${rir[i] ?? 2}"></div>`).join('')}`; }
+function readSeriesCfg(prefix) { return [...document.querySelectorAll(`#${prefix}SeriesCfg [data-sercfg]`)].reduce((a, e) => { const i = +e.dataset.i; (a[e.dataset.sercfg] ||= [])[i] = Math.max(0, Math.round(num(e.value) || 0)); return a; }, {}); }
 const STEPS = {                                                         // [mín, máx] kg por semana
   principiante: { comp: [2, 5],     iso: [1, 2] },
   intermedio:   { comp: [1, 2.5],   iso: [0.5, 1] },
   avanzado:     { comp: [0.5, 1],   iso: [0, 0.5] }
 };
+const MUSCLE_STEPS = { Gemelo: 0.35, Abdomen: 0.35, Antebrazo: 0.35, Bíceps: 0.65, Tríceps: 0.65, Hombro: 0.75, Pecho: 1, Espalda: 1, Cuádriceps: 1, Femoral: 0.85, Glúteo: 0.85 };
 const roundHalf = x => Math.round(x * 2) / 2;
 /* Feedback nutricional por estado del NAI (veraz, pero formulado para reforzar la confianza del atleta). */
 const NUTRI_FB = {
@@ -881,11 +895,12 @@ const NUTRI_FB = {
 const pureKg = s => s.kg / (1 + (s.nai_mod || 0));
 function suggest(prev, ex, level, nai) {
   if (!prev) return null;
-  const R = ex.target_reps, T = ex.target_rir;
+  const targets = seriesTargets(ex), idx = prev.set_no ? prev.set_no - 1 : 0, R = targets.reps[idx] || ex.target_reps, T = targets.rir[idx] ?? ex.target_rir;
   const pk = pureKg(prev);                                              // W_histórico puro (sin el empujón nutricional de aquel día)
   const est = e1rm(pk, prev.reps, prev.rir);
   const wTarget = est / (1 + (R + T) / 30);                             // peso para R reps a RIR T
-  const [lo, hi] = STEPS[level][ex.kind === 'compuesto' ? 'comp' : 'iso'];
+  let [lo, hi] = STEPS[level][ex.kind === 'compuesto' ? 'comp' : 'iso']; const scale = MUSCLE_STEPS[ex.muscle] || 1; lo *= scale; hi *= scale;
+  if (prev.rir === 0) return { kg: prev.kg, why: 'RIR 0: congela la carga', delta: 0, prev, nutri: { state: nai ? nai.state : 'optimal', text: NUTRI_FB[nai ? nai.state : 'optimal'] } };
   let w, why;
   if (prev.reps < R) {
     w = Math.min(wTarget, pk);
@@ -1038,10 +1053,11 @@ const foodRow = (f, showMeal) => `<div class="item"><div class="t"><div class="n
 const curEx = () => S.workout && S.workout.exercises[S.exIdx];
 /* Cada ejercicio muestra todas sus series (1..N según la rutina) como filas editables. */
 function rowFor(ex, n) {
+  const targets = seriesTargets(ex), targetReps = targets.reps[n - 1] || ex.target_reps, targetRir = targets.rir[n - 1] ?? ex.target_rir;
   const done = ex.today.find(s => s.set_no === n), sug = getSuggestion(ex, n);
   if (done) return { kg: String(done.kg), reps: String(done.reps), rir: String(done.rir), sug, done: true, dirty: false, touched: true };
   const prevRow = ex.rows[n - 2];
-  return { kg: sug ? String(sug.kg) : prevRow ? prevRow.kg : '', reps: String(ex.target_reps), rir: String(ex.target_rir), sug, done: false, dirty: false, touched: false };
+  return { kg: sug ? String(sug.kg) : prevRow ? prevRow.kg : '', reps: String(targetReps), rir: String(targetRir), sug, done: false, dirty: false, touched: false };
 }
 function initRows(ex) {
   const n = Math.max(ex.sets, ...ex.today.map(s => s.set_no));
@@ -1069,14 +1085,14 @@ function renderWorkout() {
       <input data-n="${n}" data-f="kg" inputmode="decimal" value="${esc(r.kg)}" aria-label="Kg serie ${n}">
       <input data-n="${n}" data-f="reps" inputmode="numeric" value="${esc(r.reps)}" aria-label="Reps serie ${n}">
       <input data-n="${n}" data-f="rir" inputmode="numeric" value="${esc(r.rir)}" aria-label="RIR serie ${n}">
-      <button class="ok ${saved ? 'on' : ''}" data-act="saveset" data-n="${n}" aria-label="${saved ? 'Quitar' : 'Guardar'} serie ${n}">${saved ? '✓' : r.done ? '💾' : '○'}</button></div>
+      <button class="ok ${saved ? 'on' : ''}" data-act="saveset" data-n="${n}" aria-label="${saved ? 'Quitar' : 'Guardar'} serie ${n}">${saved ? '✓' : r.done ? '💾' : '○'}</button><button class="trash" data-act="deleteset" data-n="${n}" aria-label="Eliminar serie ${n}">🗑️</button></div>
       ${sug ? `<button class="hint" data-act="fillsug" data-n="${n}">🔍 <b>${fmt(sug.kg)} kg</b> · ${esc(sug.why)}</button>` : ''}</div>`;
   }).join('');
   box.innerHTML = `<div class="wk-h"><div style="min-width:0"><b>${esc(ex.name)}</b>
       <div><span class="chip mut">${esc(ex.muscle)}</span> <small>Ej. ${S.exIdx + 1}/${total} · ${ex.today.length}/${ex.rows.length} series · obj. ${ex.target_reps} reps @ RIR ${ex.target_rir}${tgt ? ` · ~${fmt(tgt)} kg` : ''}</small></div></div>
       <button class="info-btn" data-act="info" aria-label="Información">i</button></div>
     ${ex.prev.length ? '' : `<div class="mut" style="font-size:12.5px">Primera vez: elige un peso con el que logres ${ex.target_reps} reps a RIR ${ex.target_rir}.</div>`}
-    <div class="shead"><span></span><span>Kg</span><span>Reps</span><span>RIR</span><span></span></div>
+    <div class="shead"><span></span><span>Kg</span><span>Reps</span><span>RIR</span><span></span><span></span></div>
     ${rows}
     <div class="actions3">${S.exIdx > 0 ? '<button class="btn" data-act="prevex" aria-label="Ejercicio anterior">‹</button>' : '<span></span>'}
       <button class="btn" data-act="addset">＋ Serie</button>
@@ -1127,9 +1143,13 @@ function renderAx() {
     : '<div class="empty">No hay ejercicios con ese nombre.</div>')
     + `<button type="button" class="btn big" data-act="newextra" style="margin-top:6px">＋ Crear ${raw ? '«' + esc(raw) + '»' : 'ejercicio nuevo'}</button>`;
 }
-function showNewExtra() { $('#axName').value = $('#axq').value.trim(); $('#axForm').hidden = false; $('#axName').focus(); }
+function showNewExtra() { $('#axName').value = $('#axq').value.trim(); $('#axForm').hidden = false; renderSeriesCfg('ax', $('#axSets').value, [], []); $('#axName').focus(); }
 async function addExtra(id) {
   if (!S.extraIds.includes(id)) S.extraIds.push(id);
+  const catalogEx = S.catalog.find(e => e.id === id) || S.routine.find(e => e.id === id);
+  if (catalogEx && catalogEx.weekday < 0) {
+    try { await post('/routine/' + id, { weekday: wdIndex(S.day), name: catalogEx.name, muscle: catalogEx.muscle, kind: catalogEx.kind, sets: catalogEx.sets, target_reps: catalogEx.target_reps, target_rir: catalogEx.target_rir }, 'PUT'); catalogEx.weekday = wdIndex(S.day); S.extraIds = S.extraIds.filter(x => x !== id); } catch (e) {}
+  }
   await loadWorkout();
   S.exIdx = Math.max(0, S.workout.exercises.findIndex(e => e.id === id)); renderWorkout();
   $('#addExSheet').hidden = true; toast('Ejercicio añadido al entreno de hoy');
@@ -1137,9 +1157,7 @@ async function addExtra(id) {
 async function saveSet(n) {
   const ex = curEx(), r = ex && ex.rows[n - 1]; if (!r) return;
   if (r.done && !r.dirty) {                                   // pulsar una serie ya guardada la desmarca (borra)
-    const s = ex.today.find(x => x.set_no === n);
-    if (s) await api('/sets/' + s.id, { method: 'DELETE' });
-    ex.today = ex.today.filter(x => x.set_no !== n); r.done = false; renderWorkout(); return;
+    await deleteSet(n); return;
   }
   const kg = num(r.kg), reps = Math.round(num(r.reps)), rir = Math.round(num(r.rir));
   if (!(kg >= 0) || !(reps > 0) || isNaN(rir) || rir < 0) { toast('Rellena kg, reps y RIR', true); return; }
@@ -1154,6 +1172,12 @@ function goEx(i) { S.exIdx = i; renderWorkout(); }
 function addSet() {
   const ex = curEx(); if (!ex || ex.rows.length >= 12) return;
   ex.rows.push(rowFor(ex, ex.rows.length + 1)); renderWorkout();
+}
+async function deleteSet(n) {
+  const ex = curEx(), old = ex && ex.today.find(s => s.set_no === n); if (!ex) return;
+  if (!old) { ex.rows[n - 1].done = false; renderWorkout(); return; }
+  await api('/sets/' + old.id, { method: 'DELETE' }); ex.today = ex.today.filter(s => s.id !== old.id); ex.rows[n - 1].done = false; renderWorkout();
+  toast(`Serie ${n} eliminada`, null, async () => { await post('/sets', { day: old.day, exercise_id: old.exercise_id, set_no: old.set_no, kg: old.kg, reps: old.reps, rir: old.rir, at: markSession() }); await loadWorkout(); });
 }
  
 /* ================= carga de datos ================= */
@@ -1192,9 +1216,10 @@ function renderNutri() {
       return `<button class="${ds === S.nutDay ? 'on' : ''} ${ds === S.day ? 'today' : ''}" data-act="nutday" data-d="${ds}"><small style="color:inherit">${d}</small><b>${parseDate(ds).getDate()}</b></button>`; }).join('');
     const meals = MEALS.map(([k, label, ic]) => {
       const list = S.nutFoods.filter(f => f.meal === k), sub = list.reduce((a, f) => a + f.kcal, 0);
+      const col = isMealCollapsed(k);
       return `<div class="card meal"><div class="meal-h"><h3>${ic} ${label} <small>· ${fmt(sub)} kcal</small></h3>
-        <button class="btn sm" data-act="addfood" data-meal="${k}" data-day="${S.nutDay}">＋</button></div>
-        ${list.length ? list.map(f => foodRow(f, false)).join('') : '<div class="empty">Sin alimentos</div>'}</div>`; }).join('');
+        <div class="dayctl"><button class="btn sm" data-act="addfood" data-meal="${k}" data-day="${S.nutDay}">＋</button><button class="btn sm chevbtn ${col ? '' : 'open'}" data-act="togglemeal" data-meal-key="${k}" aria-expanded="${!col}" aria-label="Mostrar u ocultar ${label}">${CHEV}</button></div></div>
+        <div class="daybody ${col ? 'collapsed' : ''}"><div class="dayin" ${col ? 'inert' : ''}>${list.length ? list.map(f => foodRow(f, false)).join('') : '<div class="empty">Sin alimentos</div>'}</div></div></div>`; }).join('');
     body.innerHTML = `<div class="nav-week"><button class="btn" data-act="nutshift" data-n="-7">‹</button>
         <div>${dLabel(mon)} – ${dLabel(addDays(mon, 6))}</div><button class="btn" data-act="nutshift" data-n="7">›</button></div>
       <div class="strip">${strip}</div>
@@ -1318,6 +1343,7 @@ function openEx(ex, wd) {
   $('#exMuscle').value = ex ? ex.muscle : MUSCLES[0];
   $('#exKind').value = ex ? ex.kind : 'compuesto';
   $('#exSets').value = ex ? ex.sets : 3; $('#exReps').value = ex ? ex.target_reps : 10; $('#exRir').value = ex ? ex.target_rir : 2;
+  const t = ex ? seriesTargets(ex) : { reps: [10, 10, 10], rir: [2, 2, 2] }; renderSeriesCfg('ex', $('#exSets').value, t.reps, t.rir);
   $('#exSheet').hidden = false;
 }
  
@@ -1686,8 +1712,9 @@ document.addEventListener('click', async e => {
       case 'addfood': openFood(d.meal, d.day); break;
       case 'mode': setMode(d.v); if (d.v === 'manual') $('#q').focus(); break;
       case 'pickfood': { const r = S.results[+d.i]; fillFood(r); $('#fGrams').focus(); break; }
-      case 'delfood': if (confirm('¿Eliminar este alimento?')) { await api('/foods/' + d.id, { method: 'DELETE' }); await refreshFoods(); toast('Alimento eliminado'); } break;
+      case 'delfood': if (confirm('¿Eliminar este alimento?')) { const old = S.foods.find(f => String(f.id) === String(d.id)); await api('/foods/' + d.id, { method: 'DELETE' }); await refreshFoods(); toast('Alimento eliminado', null, old ? async () => { await post('/foods', old); await refreshFoods(); } : null); } break;
       case 'saveset': await saveSet(+d.n); break;
+      case 'deleteset': await deleteSet(+d.n); break;
       case 'fillsug': { const r = curEx().rows[+d.n - 1]; r.kg = String(r.sug.kg); r.touched = true; if (r.done) r.dirty = true; renderWorkout(); break; }
       case 'addset': addSet(); break;
       case 'addex': await openAddEx(); break;
@@ -1700,11 +1727,13 @@ document.addEventListener('click', async e => {
       case 'nutview': S.nutView = d.v; await loadNutri(); break;
       case 'nutshift': S.nutDay = addDays(S.nutDay, +d.n); await loadNutri(); break;
       case 'nutday': S.nutDay = d.d; await loadNutri(); break;
+      case 'togglemeal': toggleMeal(d.mealKey); break;
+      case 'undo': if (undoAction) { const u = undoAction; undoAction = null; $('#toast').style.display = 'none'; await u(); } break;
       case 'saveweight': { const kg = num($('#wKg').value); if (isNaN(kg)) { toast('Introduce tu peso', true); break; }
         await post('/weights', { day: S.day, kg }); toast('Peso guardado'); await loadNutri(); await loadWeights(); break; }
       case 'newex': openEx(null, d.wd !== undefined ? +d.wd : undefined); break;
       case 'editex': openEx(S.routine.find(x => x.id === +d.id)); break;
-      case 'delex': if (confirm('¿Eliminar este ejercicio y todo su historial?')) { await api('/routine/' + d.id, { method: 'DELETE' }); await loadTrain(); await loadWorkout(); toast('Ejercicio eliminado'); } break;
+      case 'delex': if (confirm('¿Eliminar este ejercicio y todo su historial?')) { const old = S.routine.find(x => String(x.id) === String(d.id)); if (old) await api('/routine/' + d.id, { method: 'DELETE' }); await loadTrain(); await loadWorkout(); toast('Ejercicio eliminado', null, old ? async () => { await post('/routine', old); await loadTrain(); await loadWorkout(); } : null); } break;
       case 'movex': await post(`/routine/${d.id}/move`, { dir: +d.dir }); await loadTrain(); await loadWorkout(); break;
       case 'toggleday': toggleDay(+d.wd); break;
       case 'opendata': openData(); break;
@@ -1742,6 +1771,8 @@ $('#fTime').addEventListener('input', () => { S.timeTouched = true; });
 $('#fMeal').addEventListener('change', () => { if (!S.timeTouched) $('#fTime').value = defTime(S.addCtx.day, $('#fMeal').value); });
 $('#scanCam').addEventListener('change', e => { scanImage(e.target.files[0]); e.target.value = ''; });
 $('#scanGal').addEventListener('change', e => { scanImage(e.target.files[0]); e.target.value = ''; });
+$('#exSets').addEventListener('input', () => { const n = Math.max(1, Math.min(12, Math.round(num($('#exSets').value) || 1))); const c = readSeriesCfg('ex'); renderSeriesCfg('ex', n, c.reps, c.rir); });
+$('#axSets').addEventListener('input', () => { const n = Math.max(1, Math.min(12, Math.round(num($('#axSets').value) || 1))); const c = readSeriesCfg('ax'); renderSeriesCfg('ax', n, c.reps, c.rir); });
 $('#q').addEventListener('input', () => { clearTimeout(qT); qT = setTimeout(searchFoods, 400); });
 ['fGrams', 'fK', 'fP', 'fC', 'fF', 'fBasis'].forEach(id => $('#' + id).addEventListener('input', updPreview));
 ['sP', 'sC', 'sF'].forEach(id => $('#' + id).addEventListener('input', updKcalCalc));
@@ -1793,6 +1824,7 @@ $('#axForm').addEventListener('submit', async e => {
   try {
     const ex = await post('/routine', { weekday: -1, name, muscle: $('#axMuscle').value, kind: $('#axKind').value,
       sets: num($('#axSets').value), target_reps: num($('#axReps').value), target_rir: num($('#axRir').value) });
+    const cfg = readSeriesCfg('ax'); saveSeriesTargets(ex.id, cfg.reps || [], cfg.rir || []);
     await addExtra(ex.id);
   } catch (err) { toast(err.message, true); }
 });
@@ -1804,6 +1836,7 @@ $('#exForm').addEventListener('submit', async e => {
   try {
     const id = $('#exId').value;
     if (id) await post('/routine/' + id, body, 'PUT'); else await post('/routine', body);
+    const savedId = id || (await api('/routine')).slice(-1)[0]?.id; const cfg = readSeriesCfg('ex'); if (savedId) saveSeriesTargets(savedId, cfg.reps || [], cfg.rir || []);
     $('#exSheet').hidden = true; toast('Ejercicio guardado ✓'); await loadTrain(); await loadWorkout();
   } catch (err) { toast(err.message, true); }
 });
@@ -1942,9 +1975,9 @@ async function openUnknownBarcode(code, offline = false) {
     if (history.length) { fillFood(history[0]); $('#foodSheet').hidden = false; toast('Usando un alimento de tu historial local', 'soft'); return; }
   } catch (e) {}
   openFood();
-  $('#fName').value = `Bebida energética / Alimento (EAN: ${code})`;
+  $('#fName').value = '';
   $('#foodSheet').hidden = false;
-  toast(offline ? 'No se pudo consultar Open Food Facts. Completa el alimento a mano.' : 'Producto no registrado en Open Food Facts. Usa la cámara para leer la tabla nutricional o completa los datos a mano', 'soft');
+  toast(offline ? 'No se pudo consultar Open Food Facts. Introduce los datos manualmente o usa el escáner OCR.' : `Producto no registrado (EAN ${code}). Introduce los datos manualmente o usa el escáner OCR.`, 'soft');
 }
 </script>
 </body>
