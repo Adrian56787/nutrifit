@@ -183,6 +183,7 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
 .barview video{width:100%;height:100%;object-fit:cover;display:block}
 .barguide{position:absolute;left:10%;right:10%;top:32%;bottom:32%;border:2px solid var(--g);border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.4),0 0 16px rgba(29,245,143,.45);pointer-events:none}
 .barguide::after{content:"";position:absolute;left:6%;right:6%;top:50%;height:2px;background:var(--g);opacity:.8;animation:barscan 1.6s ease-in-out infinite alternate}
+.barreader{position:absolute;inset:0;z-index:1}.barreader video{width:100%!important;height:100%!important;object-fit:cover!important}
 @keyframes barscan{from{transform:translateY(-28px)}to{transform:translateY(28px)}}
 @media (prefers-reduced-motion:reduce){.barguide::after{animation:none}}
 </style>
@@ -405,7 +406,7 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
 <!-- Hoja: escáner de códigos de barras -->
 <div class="sheet" id="barSheet" hidden><div class="sheet-body">
   <div class="sheet-h"><h3>📷 Código de barras</h3><button class="x" data-act="barclose" aria-label="Cerrar">✕</button></div>
-  <div class="barview"><video id="barVideo" playsinline muted></video><div class="barguide"></div></div>
+  <div class="barview"><video id="barVideo" playsinline muted></video><div id="barReader" class="barreader" hidden></div><div class="barguide"></div></div>
   <div class="mut" id="barStatus" style="margin-bottom:10px;font-size:14px">Apunta al código de barras del envase.</div>
   <div class="row"><input id="barManual" inputmode="numeric" placeholder="O escribe el código (EAN/UPC)" autocomplete="off"><button type="button" class="btn pri" style="flex:none" data-act="barmanual">Buscar</button></div>
 </div></div>
@@ -538,6 +539,16 @@ function toast(msg, err) {
   clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', err === 'soft' ? 4800 : 2400);   // 'soft' = aviso suave, no bloqueante
 }
 const MODE = { local: false };
+const OFF_TIMEOUT_MS = 3500;
+async function fetchOpenFoodFactsUrl(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OFF_TIMEOUT_MS);
+  try {
+    const r = await fetch(url, { ...options, signal: controller.signal });
+    if (!r.ok) throw new Error(`Open Food Facts respondió ${r.status}`);
+    return r;
+  } finally { clearTimeout(timer); }
+}
 async function api(path, opts = {}) {
   if (MODE.local) return localApi(path, opts);
   let r;
@@ -1454,7 +1465,7 @@ async function searchFoods() {
   let res = [];
   try { res = (await api('/foods/history?q=' + encodeURIComponent(q))).map(r => ({ ...r, src: '⭐ Tus alimentos' })); } catch (e) {}
   try {
-    const r = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=8&lc=es&cc=es&fields=product_name,brands,nutriments`);
+    const r = await fetchOpenFoodFactsUrl(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=8&lc=es&cc=es&fields=product_name,brands,nutriments`);
     const j = await r.json();
     (j.products || []).forEach(p => { const n = p.nutriments || {};
       if (p.product_name && n['energy-kcal_100g'] != null) res.push({ name: p.product_name + (p.brands ? ' (' + p.brands.split(',')[0] + ')' : ''), kcal: +n['energy-kcal_100g'], protein: +n.proteins_100g || 0, carbs: +n.carbohydrates_100g || 0, fat: +n.fat_100g || 0, carb_type: (+n.sugars_100g || 0) > 0.5 * (+n.carbohydrates_100g || 0) ? 'FAST' : 'SLOW', src: 'Open Food Facts' }); });
@@ -1476,27 +1487,28 @@ function loadTess() {
   });
 }
 async function prepImage(file) {
-  const img = await createImageBitmap(file), sc = Math.min(1, 1800 / Math.max(img.width, img.height));
+  const img = await createImageBitmap(file), sc = Math.min(1.5, 2200 / Math.max(img.width, img.height));
   const c = document.createElement('canvas'); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
-  const x = c.getContext('2d'); x.filter = 'grayscale(1) contrast(1.4)'; x.drawImage(img, 0, 0, c.width, c.height);
+  const x = c.getContext('2d', { willReadFrequently: true });
+  x.filter = 'grayscale(1) contrast(1.8) brightness(1.08)'; x.drawImage(img, 0, 0, c.width, c.height);
+  const px = x.getImageData(0, 0, c.width, c.height), d = px.data;
+  // Binarización suave: conserva letras pequeñas y reduce reflejos del aluminio.
+  for (let i = 0; i < d.length; i += 4) { const v = d[i]; const bw = v > 190 ? 255 : v < 75 ? 0 : Math.round((v - 75) * 255 / 115); d[i] = d[i + 1] = d[i + 2] = bw; }
+  x.putImageData(px, 0, 0);
   return c;
 }
 function parseLabel(raw) {
-  const t = raw.toLowerCase().replace(/,/g, '.').replace(/\s+/g, ' ');
-  // Buscador flexible que tolera palabras intermedias entre la clave y el número
-  const extract = (keywords) => {
-    for (let kw of keywords) {
-      let regex = new RegExp(kw + '[^\\d]{0,40}?(\\d+(?:\\.\\d+)?)\\s*(?:g|kcal)?', 'i');
-      let m = t.match(regex);
-      if (m) return parseFloat(m[1]);
-    }
-    return null;
-  };
+  const t = raw.toLowerCase().replace(/[|[\]]/g, ' ').replace(/,/g, '.').replace(/\s+/g, ' ');
+  const number = '(\\d+(?:\\.\\d+)?)';
+  // Se busca el primer número tras la etiqueta; funciona con español, portugués e inglés.
+  const extract = pattern => { const m = t.match(new RegExp(pattern + '[\\s\\S]*?' + number, 'i')); return m ? parseFloat(m[1]) : null; };
+  const caffeine = extract('(?:cafe[ií]na|caffeine|cafeina)[^\\d]{0,30}') ?? extract('(?:mg\\s*/\\s*100\\s*ml|100\\s*ml)[^\\d]{0,20}');
   return {
-    kcal: extract(['kcal', 'calorías', 'calorias']),
-    protein: extract(['proteína', 'proteinas', 'protein', 'prot']),
-    carbs: extract(['carbohidratos', 'carbos', 'hidratos', 'carb']),
-    fat: extract(['grasa', 'grasas', 'lípido', 'lipidos', 'fat'])
+    kcal: extract('(?:energ[ií]a|energ[eé]tico|energia|kcal|kj)[^\\d]{0,40}'),
+    protein: extract('(?:prote[ií]nas|proteinas|protein)[^\\d]{0,40}'),
+    carbs: extract('(?:hidratos|carbohidratos|carbos|carboidratos|carbohydrate)[^\\d]{0,40}'),
+    fat: extract('(?:grasas|grasa|l[ií]pidos|lipidos|gorduras|fat)[^\\d]{0,40}'),
+    caffeine_mg: caffeine
   };
 }
 async function scanImage(file) {
@@ -1506,14 +1518,14 @@ async function scanImage(file) {
     st.textContent = 'Preparando imagen…';
     const canvas = await prepImage(file);
     st.textContent = 'Cargando lector de texto…'; await loadTess();
-    const r = await Tesseract.recognize(canvas, 'spa', { logger: m => { if (m.status === 'recognizing text') st.textContent = `Leyendo tabla… ${Math.round(m.progress * 100)}%`; } });
+    const r = await Tesseract.recognize(canvas, 'spa+eng', { logger: m => { if (m.status === 'recognizing text') st.textContent = `Leyendo tabla… ${Math.round(m.progress * 100)}%`; }, tessedit_pageseg_mode: '6', preserve_interword_spaces: '1' });
     const raw = r.data.text, p = parseLabel(raw);
     $('#ocrRaw pre').textContent = raw; $('#ocrRaw').hidden = false;
-    fillFood({ ...p, name: '' });
+    fillFood({ ...p, name: '' }); if (p.caffeine_mg != null) $('#fCaf').value = Math.round(p.caffeine_mg * 10) / 10;
     const miss = [['kcal', 'kcal'], ['protein', 'proteínas'], ['carbs', 'carbohidratos'], ['fat', 'grasas']].filter(([k]) => p[k] == null).map(x => x[1]);
     st.innerHTML = miss.length ? `⚠️ No he podido leer: <b>${miss.join(', ')}</b>. Revisa y completa los valores (por 100 g).` : '✅ Valores leídos (por 100 g). Revísalos e indica los gramos.';
     $('#fGrams').focus();
-  } catch (e) { st.textContent = '⚠️ ' + e.message; }
+  } catch (e) { st.textContent = '⚠️ No se pudo leer la imagen. Completa los datos a mano.'; toast('OCR no disponible; puedes completar el alimento manualmente', 'soft'); }
 }
  
 /* ================= GESTIÓN DE DATOS (borrar / ejemplo) ================= */
@@ -1718,7 +1730,7 @@ $('#workout').addEventListener('input', e => {
   }
 });
 ['dmDate', 'dmFoods', 'dmSets', 'dmWeights'].forEach(id => $('#' + id).addEventListener('input', updDataPreview));
-$$('.sheet').forEach(s => s.addEventListener('click', e => { if (e.target === s) s.hidden = true; }));
+$$('.sheet').forEach(s => s.addEventListener('click', e => { if (e.target === s) s.id === 'barSheet' ? closeBarSheet() : s.hidden = true; }));
  
 $('#foodForm').addEventListener('submit', async e => {
   e.preventDefault();
@@ -1796,6 +1808,18 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('service-work
 /* ================= escáner de códigos de barras ================= */
 let barStream = null;
 let barDetector = null;
+let barScanner = null;
+let barLoopRunning = false;
+
+function loadBarcodeFallback() {
+  if (window.Html5Qrcode) return Promise.resolve();
+  return new Promise((ok, ko) => {
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+    s.onload = ok; s.onerror = () => ko(new Error('No se pudo cargar el lector de códigos.'));
+    document.head.appendChild(s);
+  });
+}
 
 async function openBarSheet() {
   $('#barSheet').hidden = false;
@@ -1804,35 +1828,46 @@ async function openBarSheet() {
   try {
     if ('BarcodeDetector' in window) {
       barDetector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] });
+      try { barStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: 'environment' } } }); }
+      catch (e) { barStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); }
+      $('#barReader').hidden = true; $('#barVideo').hidden = false;
+      const video = $('#barVideo'); video.srcObject = barStream; await video.play(); barLoopRunning = true; scanBarLoop();
+      return;
     }
-    barStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    const video = $('#barVideo');
-    video.srcObject = barStream;
-    await video.play();
-    scanBarLoop();
+    await loadBarcodeFallback();
+    $('#barVideo').hidden = true; $('#barReader').hidden = false;
+    barScanner = new Html5Qrcode('barReader');
+    const config = { fps: 10, qrbox: { width: 280, height: 120 }, formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E, Html5QrcodeSupportedFormats.CODE_128] };
+    const onCode = code => { if (!barScanner) return; closeBarSheet(); fetchOpenFoodFacts(code); };
+    try { await barScanner.start({ facingMode: { exact: 'environment' } }, config, onCode, () => {}); }
+    catch (e) { await barScanner.start({ facingMode: 'environment' }, config, onCode, () => {}); }
   } catch (e) {
     $('#barStatus').textContent = 'Cámara no disponible. Introduce el código manualmente.';
+    toast('No se pudo abrir la cámara; puedes introducir el código a mano', 'soft');
   }
 }
 
 function closeBarSheet() {
+  barLoopRunning = false;
+  if (barScanner) { barScanner.stop().catch(() => {}).finally(() => { barScanner.clear().catch(() => {}); barScanner = null; }); }
   if (barStream) {
     barStream.getTracks().forEach(t => t.stop());
     barStream = null;
   }
+  const video = $('#barVideo'); if (video) { video.pause(); video.srcObject = null; video.hidden = false; }
+  const reader = $('#barReader'); if (reader) { reader.hidden = true; reader.innerHTML = ''; }
   $('#barSheet').hidden = true;
 }
 
 async function scanBarLoop() {
-  if (!barStream) return;
+  if (!barStream || !barLoopRunning) return;
   const video = $('#barVideo');
   if (barDetector && video.readyState === video.HAVE_ENOUGH_DATA) {
     try {
       const codes = await barDetector.detect(video);
       if (codes.length > 0) {
         const code = codes[0].rawValue;
-        closeBarSheet();
-        await fetchOpenFoodFacts(code);
+        closeBarSheet(); await fetchOpenFoodFacts(code);
         return;
       }
     } catch (err) {}
@@ -1843,7 +1878,7 @@ async function scanBarLoop() {
 async function fetchOpenFoodFacts(code) {
   toast('Buscando producto en Open Food Facts…', 'soft');
   try {
-    const r = await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
+    const r = await fetchOpenFoodFactsUrl(`https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(code)}.json`);
     const j = await r.json();
     if (j.status === 1 && j.product) {
       const p = j.product;
@@ -1859,12 +1894,25 @@ async function fetchOpenFoodFacts(code) {
       $('#foodSheet').hidden = false;
       toast('¡Producto encontrado! Revisa y guarda.');
     } else {
-      toast('Producto no encontrado en Open Food Facts', true);
+      await openUnknownBarcode(code);
     }
   } catch (e) {
-    toast('Error de conexión al buscar el código', true);
+    await openUnknownBarcode(code, true);
   }
+}
+
+async function openUnknownBarcode(code, offline = false) {
+  // Intenta primero el historial local; si no hay coincidencia, deja el formulario listo.
+  try {
+    const history = await api('/foods/history?q=' + encodeURIComponent(code));
+    if (history.length) { fillFood(history[0]); $('#foodSheet').hidden = false; toast('Usando un alimento de tu historial local', 'soft'); return; }
+  } catch (e) {}
+  openFood();
+  $('#fName').value = `Bebida energética / Alimento (EAN: ${code})`;
+  $('#foodSheet').hidden = false;
+  toast(offline ? 'No se pudo consultar Open Food Facts. Completa el alimento a mano.' : 'Producto no registrado en Open Food Facts. Usa la cámara para leer la tabla nutricional o completa los datos a mano', 'soft');
 }
 </script>
 </body>
 </html>
+
