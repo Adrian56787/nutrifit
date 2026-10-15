@@ -92,8 +92,8 @@ label.f{display:block;font-size:12px;color:var(--mut);margin-bottom:10px}label.f
 .srow.done .sn{color:var(--g)}
 .srow .ok{height:44px;border-radius:12px;border:1px solid var(--line);background:var(--card2);color:var(--mut);font-size:20px;font-weight:800;padding:0}
 .srow .ok.on{background:var(--g);color:#032014;border-color:var(--g)}
-.hint{display:block;width:100%;background:none;border:0;color:var(--mut);font-size:11.5px;text-align:left;padding:2px 4px 0;line-height:1.25}
-.hint b{color:var(--g)}
+.hint{display:block;width:100%;background:none;border:0;color:#c9d3ce;font-size:12px;text-align:left;padding:2px 4px 0;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hint b{color:inherit}.hint small{color:inherit;opacity:.75;font-size:11px}
 .actions3{display:grid;grid-template-columns:auto auto 1fr;gap:6px;margin-top:8px}
 .actions3 .btn{padding:12px 10px;font-size:15px}
 /* tabla de score */
@@ -105,7 +105,7 @@ table.score{width:100%;border-collapse:collapse;margin:6px 0}
 .score .sc{font-weight:800;white-space:nowrap;font-size:17px}
 .score .sc small{display:block;font-size:12px;font-weight:700;color:inherit}
 .score .sc.up{color:var(--g)}.score .sc.down{color:#ff2d46}.score .sc.na{color:var(--mut)}.score .sc.na small{font-weight:600}
-input[type=date]{color-scheme:dark}
+input[type=date],input[type=time]{color-scheme:dark}
 /* fecha */
 .strip{display:flex;gap:5px;margin-bottom:10px}
 .strip button{flex:1;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 0;color:var(--txt);display:flex;flex-direction:column;align-items:center}
@@ -246,10 +246,16 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
           <label class="f">Nivel de entrenamiento (define el ritmo de progresión)
             <select id="sLevel"><option value="principiante">Principiante (0-1 año)</option><option value="intermedio">Intermedio (1-3 años)</option><option value="avanzado">Avanzado (3+ años)</option></select>
           </label>
+          <label class="f">Tolerancia a estimulantes (escala el efecto de la cafeína en la recomendación de cargas)
+            <select id="sTol"><option value="baja">Baja · muy sensible</option><option value="media">Media</option><option value="alta">Alta · acostumbrado a la cafeína</option></select>
+          </label>
           <button class="btn pri big" data-act="savesettings">Guardar ajustes manuales</button>
       </div>
     </div>
 
+    <div class="card"><label class="f" style="margin:0">🕒 Zona horaria (hora de comidas y entrenos)
+      <select id="sTz"></select></label>
+      <div class="preview" id="tzNow" style="margin:8px 0 0"></div></div>
     <div class="card"><button class="btn big" data-act="info">ℹ️ ¿Qué es la sobrecarga progresiva?</button></div>
     <div class="card"><button class="btn big" data-act="opendata">🧹 Gestionar datos (borrar / ejemplo)</button></div>
     <div class="card" id="installBox" hidden><button class="btn big" data-act="install">📲 Instalar app en la pantalla de inicio</button></div>
@@ -286,6 +292,11 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
       <label class="f">Comida<select id="fMeal"><option value="desayuno">Desayuno</option><option value="almuerzo">Almuerzo</option><option value="merienda">Merienda</option><option value="cena">Cena</option><option value="suplementos">Suplementos</option></select></label>
       <label class="f">Gramos consumidos<input id="fGrams" inputmode="decimal" placeholder="g"></label>
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+      <label class="f">Hora<input id="fTime" type="time"></label>
+      <label class="f">Carbos<select id="fCT"><option value="SLOW">Lentos</option><option value="FAST">Rápidos</option></select></label>
+      <label class="f">Cafeína (mg)<input id="fCaf" inputmode="decimal" placeholder="0"></label>
+    </div>
     <label class="f">Los valores de abajo son…<select id="fBasis"><option value="per100">por 100 g</option><option value="total">de la ración completa</option></select></label>
     <div class="grid4">
       <label class="f">kcal<input id="fK" inputmode="decimal"></label>
@@ -309,9 +320,9 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
       <label class="f">Grupo muscular<select id="exMuscle"></select></label>
       <label class="f">Tipo<select id="exKind"><option value="compuesto">Compuesto</option><option value="aislamiento">Aislamiento</option></select></label>
     </div>
-    <div class="grid3" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
       <label class="f">Series<input id="exSets" inputmode="numeric" value="3"></label>
-      <label class="f">Reps obj.<input id="exReps" inputmode="numeric" value="10"></label>
+      <input id="exReps" type="hidden" value="10">
       <label class="f">RIR obj.<input id="exRir" inputmode="numeric" value="2"></label>
     </div>
     <button class="btn pri big" type="submit">Guardar ejercicio</button>
@@ -351,9 +362,9 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
       <label class="f">Grupo muscular<select id="axMuscle"></select></label>
       <label class="f">Tipo<select id="axKind"><option value="compuesto">Compuesto</option><option value="aislamiento">Aislamiento</option></select></label>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
       <label class="f">Series<input id="axSets" inputmode="numeric" value="3"></label>
-      <label class="f">Reps obj.<input id="axReps" inputmode="numeric" value="10"></label>
+      <input id="axReps" type="hidden" value="10">
       <label class="f">RIR obj.<input id="axRir" inputmode="numeric" value="2"></label>
     </div>
     <button class="btn pri big" type="submit">Crear y añadir al entreno</button>
@@ -395,7 +406,18 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 const pad = n => String(n).padStart(2, '0');
 const fmtDate = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const parseDate = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
-const todayStr = () => fmtDate(new Date());
+/* Reloj con zona horaria configurable (Ajustes). «auto» = la del dispositivo. */
+const TZ_KEY = 'nutrifit.tz';
+const getTZ = () => { try { const v = localStorage.getItem(TZ_KEY); return v && v !== 'auto' ? v : undefined; } catch (e) { return undefined; } };
+function tzParts() {
+  try {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: getTZ(), year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date()).map(x => [x.type, x.value]));
+    return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
+  } catch (e) { const d = new Date(); return { date: fmtDate(d), time: `${pad(d.getHours())}:${pad(d.getMinutes())}` }; }
+}
+const todayStr = () => tzParts().date;
+const nowHM = () => tzParts().time;
 const addDays = (s, n) => { const d = parseDate(s); d.setDate(d.getDate()+n); return fmtDate(d); };
 const wdIndex = s => (parseDate(s).getDay() + 6) % 7;
 const mondayOf = s => addDays(s, -wdIndex(s));
@@ -512,6 +534,58 @@ function lCompute(p) {
   if (p.adjust < -25) warnings.push('Un déficit superior al 25 % es agresivo y difícil de sostener.');
   return { bmr: Math.round(bmr), tdee: Math.round(tdee), kcal: Math.round(kcal), protein: Math.round(protein), carbs: Math.round(carbs), fat: Math.round(fat), lbm: lbm ? r1(lbm) : null, warnings };
 }
+/* ---- Física metabólica (espejo de metabolic.py, para el modo local) ---- */
+const MET = { TOL: { baja: 1.25, media: 1, alta: 0.6 }, HOURS: { desayuno: '08:00', almuerzo: '14:00', merienda: '17:30', cena: '21:00', suplementos: '09:00' }, BETA: 0.0003, MOD: 0.05 };
+const clip = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+const curve = (t, lo, hi, sr, sf) => t >= lo && t <= hi ? 1 : Math.exp(-0.5 * ((t < lo ? (t - lo) / sr : (t - hi) / sf) ** 2));
+const kFast = t => curve(t, 35, 40, 15, 55);                                   // pico 35-40 min
+const kSlow = (t, fb = 1) => { const sh = (1 - fb) * 20; return curve(t, 70 + sh, 90 + sh, 30, 60); };   // pico 70-90 min (+buffer)
+const kCaf = t => curve(t, 45, 45, 20, 120);                                   // pico cafeína 45 min
+const fBuffer = (fat, pro, carb) => 1 - Math.min(0.5, (fat * 1.5 + pro * 0.5) / (carb + 1));
+function lts(v, day, meal) {
+  const s = String(v || '').trim();
+  if (s) {
+    if (/^\d{1,2}:\d{2}$/.test(s)) return `${day}T${s.padStart(5, '0')}`;
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s)) return s.slice(0, 10) + 'T' + s.slice(11, 16);
+    lfail('Hora no válida (use HH:MM)');
+  }
+  return `${day}T${MET.HOURS[meal] || '12:00'}`;
+}
+function lat(v) { const s = String(v || '').trim(); if (!s) return nowHM(); if (!/^\d{1,2}:\d{2}$/.test(s)) lfail('Hora no válida (use HH:MM)'); return s.padStart(5, '0'); }
+function lfood(b, day, meal) {
+  const ct = String(b.carb_type || 'SLOW').toUpperCase(); if (!['FAST', 'SLOW'].includes(ct)) lfail('Tipo de carbohidrato no válido (FAST o SLOW)');
+  return { carb_type: ct, caffeine_mg: lnum(b.caffeine_mg ?? 0, 0, 2000, 'Cafeína'), timestamp: lts(b.timestamp, day, meal) };
+}
+function naiCompute(foods, day, at, weight, tolerance) {
+  weight = weight > 0 ? weight : 75;
+  const tol = MET.TOL[tolerance] ?? 1, start = new Date(`${day}T${at}`), meals = {};
+  foods.forEach(f => { const m = meals[f.day + '|' + f.meal] ||= { c: 0, p: 0, f: 0 }; m.c += f.carbs; m.p += f.protein; m.f += f.fat; });
+  let fast = 0, slow = 0, caf = 0, bufA = 0, bufW = 0; const used = new Set();
+  foods.forEach(f => {
+    const ts = f.timestamp || `${f.day}T${MET.HOURS[f.meal] || '12:00'}`, t = (start - new Date(ts.slice(0, 16))) / 60000;
+    if (t < 15 || t > 180) return;                                             // ventana útil de ingesta
+    const key = f.day + '|' + f.meal, m = meals[key], fb = fBuffer(m.f, m.p, m.c); used.add(key);
+    if (f.carbs > 0) {
+      if ((f.carb_type || 'SLOW') === 'FAST') fast += f.carbs * kFast(t);
+      else { slow += f.carbs * kSlow(t, fb) * fb; bufA += fb * f.carbs; bufW += f.carbs; }
+    }
+    caf += (f.caffeine_mg || 0) * kCaf(t);
+  });
+  const raw = fast + slow, cap = clip(1.5 * weight, 60, 150), eff = Math.min(raw, cap);   // techo de saturación de glucógeno
+  const ce = Math.min(0.15, tol * 0.04 * caf / weight), nai = eff * (1 + ce);
+  const base = clip(0.5 * weight, 25, 80), ratio = nai / base, mod = clip(MET.BETA * (nai - base), -MET.MOD, MET.MOD);
+  const state = ratio < 0.25 ? 'depleted' : ratio < 0.6 ? 'low' : ratio >= 1.8 ? 'max' : 'optimal';
+  return { nai: r1(nai), baseline: r1(base), ratio: Math.round(ratio * 1000) / 1000, mod: Math.round(mod * 1e4) / 1e4, state,
+    carbs_eff: r1(eff), carbs_raw: r1(raw), ceiling: r1(cap), saturated: raw > cap, caffeine_effect: Math.round(ce * 1000) / 1000,
+    caffeine_mg_active: r1(caf), f_buffer: bufW ? Math.round(bufA / bufW * 1000) / 1000 : 1, meals: used.size, fasted: ratio < 0.1,
+    tolerance: MET.TOL[tolerance] ? tolerance : 'media' };
+}
+function lnai(d, day, at) {
+  const prev = addDays(day, -1), foods = d.foods.filter(f => f.day === day || f.day === prev);
+  const wk = Object.keys(d.weights).sort(), k = wk.filter(x => x <= day).pop() || wk.pop();
+  const weight = k ? d.weights[k] : (d.settings.profile && d.settings.profile.weight) || 75;
+  const r = naiCompute(foods, day, at, weight, d.settings.tolerance || 'media'); r.at = at; return r;
+}
 function localApi(path, opts = {}) {
   const method = (opts.method || 'GET').toUpperCase();
   const body = opts.body ? JSON.parse(opts.body) : {};
@@ -525,9 +599,10 @@ function localApi(path, opts = {}) {
       if (method === 'POST') {
         ['kcal', 'protein', 'carbs', 'fat'].forEach(k => { if (k in body) d.settings[k] = lnum(body[k], 1, 20000, k); });
         if ('level' in body) { if (!LEVELS.includes(body.level)) lfail('Nivel no válido'); d.settings.level = body.level; }
+        if ('tolerance' in body) { if (!MET.TOL[body.tolerance]) lfail('Tolerancia no válida'); d.settings.tolerance = body.tolerance; }
         done();
       }
-      return { ...d.settings, profile: d.settings.profile || null };
+      return { ...d.settings, tolerance: d.settings.tolerance || 'media', profile: d.settings.profile || null };
     case 'profile': {
       const p = lProfile(body);
       if (parts[1] === 'calc') return lCompute(p);
@@ -542,7 +617,7 @@ function localApi(path, opts = {}) {
         for (const f of d.foods.slice().reverse()) {
           const key = f.name.toLowerCase();
           if (f.grams > 0 && key.includes(term) && !seen.has(key)) { seen.add(key); const k = 100 / f.grams;
-            out.push({ name: f.name, kcal: r1(f.kcal * k), protein: r1(f.protein * k), carbs: r1(f.carbs * k), fat: r1(f.fat * k) }); }
+            out.push({ name: f.name, kcal: r1(f.kcal * k), protein: r1(f.protein * k), carbs: r1(f.carbs * k), fat: r1(f.fat * k), carb_type: f.carb_type || 'SLOW', caffeine_mg: r1((f.caffeine_mg || 0) * k) }); }
           if (out.length >= 8) break;
         }
         return out;
@@ -551,7 +626,7 @@ function localApi(path, opts = {}) {
       if (method === 'POST') {
         const meal = String(body.meal || '').toLowerCase(); if (!MEAL_KEYS.includes(meal)) lfail('Comida no válida');
         const f = { id: ++d.seq.foods, day: lday(body.day), meal, name: ltext(body.name || 'Alimento', 'nombre', 80), grams: lnum(body.grams ?? 0, 0, 20000, 'Gramos'),
-          kcal: lnum(body.kcal, 0, 20000, 'kcal'), protein: lnum(body.protein, 0, 2000, 'Proteínas'), carbs: lnum(body.carbs, 0, 3000, 'Carbohidratos'), fat: lnum(body.fat, 0, 2000, 'Grasas') };
+          kcal: lnum(body.kcal, 0, 20000, 'kcal'), protein: lnum(body.protein, 0, 2000, 'Proteínas'), carbs: lnum(body.carbs, 0, 3000, 'Carbohidratos'), fat: lnum(body.fat, 0, 2000, 'Grasas'), ...lfood(body, lday(body.day), meal) };
         d.foods.push(f); return done(f);
       }
       if (method === 'DELETE') { d.foods = d.foods.filter(f => f.id !== id); return done({ ok: true }); }
@@ -596,12 +671,12 @@ function localApi(path, opts = {}) {
         const prev = prevDay ? mine.filter(s => s.day === prevDay).sort((a, b) => a.set_no - b.set_no) : [];
         return { ...e, today, prev_day: prevDay, prev };
       });
-      return { exercises, level: d.settings.level };
+      return { exercises, level: d.settings.level, nai: lnai(d, day, lat(q.get('at'))) };
     }
     case 'sets':
       if (method === 'POST') {
         const exId = Math.round(lnum(body.exercise_id, 1, 1e9, 'Ejercicio')); if (!d.routine.some(e => e.id === exId)) lfail('Ejercicio no encontrado');
-        const v = { day: lday(body.day), exercise_id: exId, set_no: Math.round(lnum(body.set_no, 1, 50, 'Serie')), kg: lnum(body.kg, 0, 1500, 'Kg'), reps: Math.round(lnum(body.reps, 1, 200, 'Reps')), rir: Math.round(lnum(body.rir, 0, 10, 'RIR')) };
+        const v = { day: lday(body.day), exercise_id: exId, set_no: Math.round(lnum(body.set_no, 1, 50, 'Serie')), kg: lnum(body.kg, 0, 1500, 'Kg'), reps: Math.round(lnum(body.reps, 1, 200, 'Reps')), rir: Math.round(lnum(body.rir, 0, 10, 'RIR')), nai_mod: lnai(d, lday(body.day), lat(body.at)).mod };
         let s = d.sets.find(x => x.day === v.day && x.exercise_id === exId && x.set_no === v.set_no);
         if (s) Object.assign(s, v); else { s = { id: ++d.seq.sets, ...v }; d.sets.push(s); }
         return done({ ...s });
@@ -621,7 +696,7 @@ function localApi(path, opts = {}) {
       foods.forEach(b => {
         const meal = String(b.meal || '').toLowerCase(); if (!MEAL_KEYS.includes(meal)) lfail('Comida no válida');
         d.foods.push({ id: ++d.seq.foods, day: lday(b.day), meal, name: ltext(b.name || 'Alimento', 'nombre', 80), grams: lnum(b.grams ?? 0, 0, 20000, 'Gramos'),
-          kcal: lnum(b.kcal, 0, 20000, 'kcal'), protein: lnum(b.protein, 0, 2000, 'Proteínas'), carbs: lnum(b.carbs, 0, 3000, 'Carbohidratos'), fat: lnum(b.fat, 0, 2000, 'Grasas') });
+          kcal: lnum(b.kcal, 0, 20000, 'kcal'), protein: lnum(b.protein, 0, 2000, 'Proteínas'), carbs: lnum(b.carbs, 0, 3000, 'Carbohidratos'), fat: lnum(b.fat, 0, 2000, 'Grasas'), ...lfood(b, lday(b.day), meal) });
       });
       sets.forEach(b => {
         const exId = Math.round(lnum(b.exercise_id, 1, 1e9, 'Ejercicio')); if (!d.routine.some(e => e.id === exId)) lfail('Ejercicio no encontrado');
@@ -632,20 +707,33 @@ function localApi(path, opts = {}) {
       weights.forEach(b => { d.weights[lday(b.day)] = lnum(b.kg, 20, 400, 'Peso'); });
       return done({ foods: foods.length, sets: sets.length, weights: weights.length });
     }
+    case 'nai': return lnai(d, lday(q.get('day')), lat(q.get('at')));
     case 'scores': {
       const a = lday(q.get('from')), b = lday(q.get('to')), per = {};
-      d.sets.filter(s => s.day >= a && s.day <= b).forEach(s => { per[s.day] = (per[s.day] || 0) + setScore(s.kg, s.reps, s.rir); });
+      d.sets.filter(s => s.day >= a && s.day <= b).forEach(s => { per[s.day] = (per[s.day] || 0) + setScore(s.kg, s.reps, s.rir) / (1 + (s.nai_mod || 0)); });
       return Object.entries(per).map(([day, score]) => ({ day, score: r1(score) }));
     }
     case 'progress': {
       const out = {};
       d.sets.filter(s => s.exercise_id === id).sort((a, b) => a.day.localeCompare(b.day) || a.set_no - b.set_no).forEach(s => {
-        const c = out[s.day] ||= { day: s.day, e1rm: 0, kg: 0 }; c.e1rm = Math.max(c.e1rm, r1(e1rm(s.kg, s.reps, s.rir))); c.kg = Math.max(c.kg, s.kg); });
+        const c = out[s.day] ||= { day: s.day, e1rm: 0, kg: 0 }; c.e1rm = Math.max(c.e1rm, r1(e1rm(s.kg, s.reps, s.rir) / (1 + (s.nai_mod || 0)))); c.kg = Math.max(c.kg, s.kg); });
       return Object.values(out);
     }
   }
   lfail('Ruta no encontrada: ' + path);
 }
+const MEAL_HOURS = { desayuno: '08:00', almuerzo: '14:00', merienda: '17:30', cena: '21:00', suplementos: '09:00' };
+const defTime = () => nowHM();   // siempre la hora real en el momento de agregar
+/* Inicio de la sesión de entreno: se fija al guardar la primera serie del día; antes de eso es «ahora». */
+const sessKey = day => 'nutrifit.sess.' + day;
+function sessAt() {
+  try {
+    const k = sessKey(S.day), v = localStorage.getItem(k);
+    if (v && S.workout && !S.workout.exercises.some(e => e.today.length)) { localStorage.removeItem(k); return nowHM(); }   // sin series hoy → sesión no iniciada
+    return v || nowHM();
+  } catch (e) { return nowHM(); }
+}
+function markSession() { try { const k = sessKey(S.day); let v = localStorage.getItem(k); if (!v) { v = nowHM(); localStorage.setItem(k, v); } return v; } catch (e) { return nowHM(); } }
 const post = (p, body, method = 'POST') => api(p, { method, body: JSON.stringify(body) });
  
 /* ================= estado ================= */
@@ -653,7 +741,7 @@ const S = {
   day: todayStr(), settings: { kcal: 2400, protein: 150, carbs: 280, fat: 70, level: 'intermedio' },
   foods: [], workout: null, exIdx: 0, extraIds: [], catalog: [],
   tab: 'home', nutView: 'day', nutDay: todayStr(), nutFoods: [], weeks: [], weights: [],
-  routine: [], metric: 'e1rm', addCtx: { day: todayStr(), meal: 'almuerzo' }, results: [], progData: []
+  routine: [], nai: null, metric: 'e1rm', addCtx: { day: todayStr(), meal: 'almuerzo' }, results: [], progData: []
 };
  
 /* ================= motor de sobrecarga progresiva ================= */
@@ -664,31 +752,55 @@ const STEPS = {                                                         // [mín
   avanzado:     { comp: [0.5, 1],   iso: [0, 0.5] }
 };
 const roundHalf = x => Math.round(x * 2) / 2;
-function suggest(prev, ex, level) {
+/* Feedback nutricional por estado del NAI (veraz, pero formulado para reforzar la confianza del atleta). */
+const NUTRI_FB = {
+  max:      '🔥 Glucógeno al máximo: ventana ideal para exprimir fibras de alto umbral',
+  optimal:  '⚡ Glucógeno y disponibilidad pre-entreno óptimos',
+  low:      '🔋 Energía moderada: carga conservadora para entrenar fino y seguro',
+  depleted: '🛡️ Reservas bajas: mantener la carga protege tu sistema neuromuscular'
+};
+/* W_rec = W_histórico × (1 + progreso base + β·(NAI − NAI_base)), con reglas por estado:
+   · optimal  → sobrecarga estándar + modificador nutricional
+   · low      → nunca por encima de la carga previa
+   · depleted → mantener la carga previa (o −2 % si es ayuno casi total)
+   · max      → modificador + un salto extra (solo si cumpliste las reps la vez anterior) */
+function suggest(prev, ex, level, nai) {
   if (!prev) return null;
   const R = ex.target_reps, T = ex.target_rir;
-  const est = e1rm(prev.kg, prev.reps, prev.rir);
+  const pk = prev.kg / (1 + (prev.nai_mod || 0));                       // W_histórico puro (sin el empujón nutricional de aquel día)
+  const est = e1rm(pk, prev.reps, prev.rir);
   const wTarget = est / (1 + (R + T) / 30);                             // peso para R reps a RIR T
   const [lo, hi] = STEPS[level][ex.kind === 'compuesto' ? 'comp' : 'iso'];
   let w, why;
   if (prev.reps < R) {
-    w = Math.min(wTarget, prev.kg);
-    why = `No llegaste a ${R} reps: ajusta la carga`;
+    w = Math.min(wTarget, pk);
+    why = 'No llegaste a las reps: ajusta';
   } else if (prev.rir >= 2) {
-    w = Math.min(Math.max(wTarget, prev.kg + lo), prev.kg + hi);
-    why = (level === 'avanzado' && ex.kind !== 'compuesto' && w <= prev.kg)
-      ? 'Mismo peso: busca +1 rep' : `${R} reps a RIR ${prev.rir}: sube la carga`;
+    w = Math.min(Math.max(wTarget, pk + lo), pk + hi);
+    why = (level === 'avanzado' && ex.kind !== 'compuesto' && w <= pk)
+      ? 'Busca +1 rep' : 'Sube la carga';
   } else {
-    w = prev.kg;
-    why = `Reps logradas a RIR ${prev.rir}: mantén`;
+    w = pk;
+    why = 'Mantén la carga';
   }
-  w = roundHalf(w);
-  const d = Math.round((w - prev.kg) * 10) / 10;
-  return { kg: w, why, delta: d, prev };
+  const st = nai ? nai.state : 'optimal', mod = nai ? nai.mod : 0;
+  let wr = w * (1 + mod);
+  if (st === 'depleted') {
+    wr = Math.min(wr, nai.fasted ? prev.kg * 0.98 : prev.kg);
+    why = nai.fasted ? 'Sin carbos recientes: −2 %' : 'Pocos carbos recientes: no subas';
+  } else if (st === 'low' && wr > prev.kg) {
+    wr = prev.kg; why = 'Energía moderada: no subas';
+  } else if (st === 'max' && prev.reps >= R && prev.rir >= 1) {
+    wr = Math.min(wr + Math.max(0.5, hi * 0.5), prev.kg * 1.05);        // salto extra, con tope de seguridad del +5 %
+    why = 'Glucógeno alto: salto extra';
+  }
+  wr = roundHalf(wr);
+  const d = Math.round((wr - prev.kg) * 10) / 10;
+  return { kg: wr, why, delta: d, prev, nutri: { state: st, text: NUTRI_FB[st] } };
 }
 function getSuggestion(ex, setNo) {
   const p = ex.prev.find(s => s.set_no === setNo) || ex.prev[ex.prev.length - 1];
-  return suggest(p, ex, S.settings.level);
+  return suggest(p, ex, S.settings.level, S.nai);
 }
  
 /* ================= gráficos SVG ================= */
@@ -764,7 +876,7 @@ function renderSummary() {
     <div class="bars">${macroBar('Proteínas', 'p', t.p, st.protein)}${macroBar('Carbohidratos', 'c', t.c, st.carbs)}${macroBar('Grasas', 'f', t.f, st.fat)}</div></div>${weightLine()}`;
 }
 const foodRow = (f, showMeal) => `<div class="item"><div class="t"><div class="n">${esc(f.name)}</div>
-  <div class="m">${showMeal ? esc(f.meal) + ' · ' : ''}${f.grams ? fmt(f.grams) + ' g · ' : ''}P ${fmt(f.protein)} · C ${fmt(f.carbs)} · G ${fmt(f.fat)}</div></div>
+  <div class="m">${showMeal ? esc(f.meal) + ' · ' : ''}${f.timestamp ? f.timestamp.slice(11, 16) + ' · ' : ''}${f.grams ? fmt(f.grams) + ' g · ' : ''}${f.carb_type === 'FAST' ? '⚡ ' : ''}P ${fmt(f.protein)} · C ${fmt(f.carbs)} · G ${fmt(f.fat)}${f.caffeine_mg ? ' · ☕ ' + fmt(f.caffeine_mg) + ' mg' : ''}</div></div>
   <div class="k">${fmt(f.kcal)}<br><small>kcal</small></div>
   <button class="trash" data-act="delfood" data-id="${f.id}" aria-label="Eliminar">🗑</button></div>`;
  
@@ -804,7 +916,7 @@ function renderWorkout() {
       <input data-n="${n}" data-f="reps" inputmode="numeric" value="${esc(r.reps)}" aria-label="Reps serie ${n}">
       <input data-n="${n}" data-f="rir" inputmode="numeric" value="${esc(r.rir)}" aria-label="RIR serie ${n}">
       <button class="ok ${saved ? 'on' : ''}" data-act="saveset" data-n="${n}" aria-label="${saved ? 'Quitar' : 'Guardar'} serie ${n}">${saved ? '✓' : r.done ? '💾' : '○'}</button></div>
-      ${sug ? `<button class="hint" data-act="fillsug" data-n="${n}">💡 <b>${fmt(sug.kg)} kg</b> · ${esc(sug.why)} <small>(antes ${fmt(sug.prev.kg)}×${sug.prev.reps} @${sug.prev.rir})</small></button>` : ''}</div>`;
+      ${sug ? `<button class="hint" data-act="fillsug" data-n="${n}">🔍 <b>${fmt(sug.kg)} kg</b> · ${esc(sug.why)}</button>` : ''}</div>`;
   }).join('');
   box.innerHTML = `<div class="wk-h"><div style="min-width:0"><b>${esc(ex.name)}</b>
       <div><span class="chip mut">${esc(ex.muscle)}</span> <small>Ej. ${S.exIdx + 1}/${total} · ${ex.today.length}/${ex.rows.length} series · obj. ${ex.target_reps} reps @ RIR ${ex.target_rir}${tgt ? ` · ~${fmt(tgt)} kg` : ''}</small></div></div>
@@ -819,7 +931,7 @@ function renderWorkout() {
 /* ---- Dominio: score de rendimiento efectivo ----
    Score serie = (kg × reps) × (1 + máx(0, 5 − RIR) / 5)  → penaliza las series lejanas al fallo. */
 const setScore = (kg, reps, rir) => kg * reps * (1 + Math.max(0, 5 - rir) / 5);
-const effectiveScore = sets => sets.reduce((a, s) => a + setScore(s.kg, s.reps, s.rir), 0);
+const effectiveScore = sets => sets.reduce((a, s) => a + setScore(s.kg, s.reps, s.rir) / (1 + (s.nai_mod || 0)), 0);   // fuerza pura
 const scoreChange = (today, prev) => prev > 0 ? (today - prev) / prev * 100 : null;
 function renderFinish() {
   const list = S.workout.exercises.map((ex, i) => ({ ex, i })).filter(({ ex }) => ex.today.length);
@@ -877,12 +989,12 @@ async function saveSet(n) {
   }
   const kg = num(r.kg), reps = Math.round(num(r.reps)), rir = Math.round(num(r.rir));
   if (!(kg >= 0) || !(reps > 0) || isNaN(rir) || rir < 0) { toast('Rellena kg, reps y RIR', true); return; }
-  const saved = await post('/sets', { day: S.day, exercise_id: ex.id, set_no: n, kg, reps, rir });
+  const saved = await post('/sets', { day: S.day, exercise_id: ex.id, set_no: n, kg, reps, rir, at: markSession() });
   ex.today = ex.today.filter(s => s.set_no !== n).concat(saved).sort((a, b) => a.set_no - b.set_no);
   r.done = true; r.dirty = false; r.touched = true;
   ex.rows.forEach((x, i) => { if (i + 1 > n && !x.done && !x.touched && !x.sug) x.kg = String(kg); });   // sin referencia previa: arrastra el peso
   renderWorkout();
-  toast(`✓ Serie ${n} guardada · e1RM ${fmt(e1rm(kg, reps, rir))} kg`);
+  toast(`✓ Serie ${n} guardada · e1RM puro ${fmt(e1rm(kg, reps, rir) / (1 + (saved.nai_mod || 0)))} kg`);
 }
 function goEx(i) { S.exIdx = i; renderWorkout(); }
 function addSet() {
@@ -893,8 +1005,19 @@ function addSet() {
 /* ================= carga de datos ================= */
 async function loadWeights() { try { S.weights = await api('/weights'); } catch (e) {} renderSummary(); }
 async function loadFoods() { S.foods = await api('/foods?day=' + S.day); renderSummary(); }
-async function loadWorkout() { S.workout = await api('/workout?day=' + S.day + (S.extraIds.length ? '&extra=' + S.extraIds.join(',') : '')); S.settings.level = S.workout.level; pickStartExercise(); renderWorkout(); }
-async function refreshFoods() { await loadFoods(); if (S.tab === 'nutri' && S.nutView === 'day') await loadNutri(); }
+async function loadWorkout() { S.workout = await api('/workout?day=' + S.day + '&at=' + sessAt() + (S.extraIds.length ? '&extra=' + S.extraIds.join(',') : '')); S.settings.level = S.workout.level; S.nai = S.workout.nai; pickStartExercise(); renderWorkout(); }
+/* Recalcula el NAI (nueva comida, comida borrada, paso del tiempo) y refresca las cargas recomendadas sin pisar lo que el usuario ya ha tocado. */
+async function refreshNai() {
+  if (!S.workout) return;
+  const a = document.activeElement; if (a && a.closest && a.closest('#workout')) return;   // no interrumpir la escritura
+  try { S.nai = await api(`/nai?day=${S.day}&at=${sessAt()}`); } catch (e) { return; }
+  S.workout.exercises.forEach(ex => (ex.rows || []).forEach((r, i) => {
+    r.sug = getSuggestion(ex, i + 1);
+    if (!r.done && !r.touched && r.sug) r.kg = String(r.sug.kg);
+  }));
+  renderWorkout();
+}
+async function refreshFoods() { await loadFoods(); if (S.tab === 'nutri' && S.nutView === 'day') await loadNutri(); await refreshNai(); }
  
 /* ================= NUTRICIÓN ================= */
 async function loadNutri() {
@@ -1024,8 +1147,23 @@ function openEx(ex, wd) {
 /* ================= AJUSTES ================= */
 function fillSettings() {
   const s = S.settings;
-  $('#sKcal').value = s.kcal; $('#sP').value = s.protein; $('#sC').value = s.carbs; $('#sF').value = s.fat; $('#sLevel').value = s.level;
-  updKcalCalc(); fillProfile();
+  $('#sKcal').value = s.kcal; $('#sP').value = s.protein; $('#sC').value = s.carbs; $('#sF').value = s.fat; $('#sLevel').value = s.level; $('#sTol').value = s.tolerance || 'media';
+  updKcalCalc(); fillProfile(); fillTZ();
+}
+
+/* ----- zona horaria ----- */
+function updTz() { const t = tzParts(); $('#tzNow').innerHTML = `Ahora: <b>${t.time}</b> · ${dLabel(t.date)}`; }
+function fillTZ() {
+  const sel = $('#sTz');
+  if (!sel.options.length) {
+    let zones = []; try { zones = Intl.supportedValuesOf('timeZone'); } catch (e) {}
+    if (!zones.length) zones = ['Europe/Madrid', 'Atlantic/Canary', 'Europe/London', 'America/New_York', 'America/Mexico_City', 'America/Bogota', 'America/Argentina/Buenos_Aires', 'America/Santiago', 'UTC'];
+    zones = ['Europe/Madrid', 'Atlantic/Canary', ...zones.filter(z => z !== 'Europe/Madrid' && z !== 'Atlantic/Canary')];
+    let dev = ''; try { dev = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) {}
+    sel.innerHTML = `<option value="auto">Automática del dispositivo${dev ? ' (' + esc(dev) + ')' : ''}</option>` + zones.map(z => `<option value="${esc(z)}">${esc(z.replace(/_/g, ' '))}</option>`).join('');
+  }
+  let v = 'auto'; try { v = localStorage.getItem(TZ_KEY) || 'auto'; } catch (e) {}
+  sel.value = [...sel.options].some(o => o.value === v) ? v : 'auto'; updTz();
 }
 
 /* ----- calculadora nutricional (BMR / TDEE / macros) ----- */
@@ -1113,10 +1251,11 @@ const macroKcal = () => (num($('#sP').value) || 0) * 4 + (num($('#sC').value) ||
 function updKcalCalc() { $('#kcalCalc').innerHTML = `Calorías según tus macros: <b>${fmt(macroKcal())} kcal</b><br><small>4 kcal/g proteína y carbohidratos · 9 kcal/g grasa</small>`; }
  
 /* ================= AGREGAR COMIDA ================= */
-const mealByHour = () => { const h = new Date().getHours() + new Date().getMinutes() / 60; return h < 11.5 ? 'desayuno' : h < 17 ? 'almuerzo' : h < 20 ? 'merienda' : 'cena'; };
+const mealByHour = () => { const h = (([H, M]) => H + M / 60)(nowHM().split(':').map(Number)); return h < 11.5 ? 'desayuno' : h < 17 ? 'almuerzo' : h < 20 ? 'merienda' : 'cena'; };
 function openFood(meal, day) {
   S.addCtx = { day: day || S.day, meal: meal || mealByHour() };
   $('#foodForm').reset(); $('#fMeal').value = S.addCtx.meal; $('#fBasis').value = 'per100';
+  $('#fTime').value = defTime(S.addCtx.day, S.addCtx.meal); S.timeTouched = false; $('#fCT').value = 'SLOW';
   $('#scanStatus').textContent = 'Fotografía la tabla nutricional del envase (valores por 100 g).';
   $('#ocrRaw').hidden = true; $('#results').innerHTML = ''; $('#q').value = '';
   setMode('scan'); updPreview(); $('#foodSheet').hidden = false;
@@ -1139,7 +1278,7 @@ function updPreview() {
 function fillFood(o) {
   $('#fName').value = o.name || $('#fName').value;
   [['fK', o.kcal], ['fP', o.protein], ['fC', o.carbs], ['fF', o.fat]].forEach(([id, v]) => { if (v != null && !isNaN(v)) $('#' + id).value = Math.round(v * 10) / 10; });
-  $('#fBasis').value = 'per100'; updPreview();
+  $('#fBasis').value = 'per100'; if (o.carb_type) $('#fCT').value = o.carb_type; updPreview();
 }
 let qT;
 async function searchFoods() {
@@ -1152,7 +1291,7 @@ async function searchFoods() {
     const r = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=8&lc=es&cc=es&fields=product_name,brands,nutriments`);
     const j = await r.json();
     (j.products || []).forEach(p => { const n = p.nutriments || {};
-      if (p.product_name && n['energy-kcal_100g'] != null) res.push({ name: p.product_name + (p.brands ? ' (' + p.brands.split(',')[0] + ')' : ''), kcal: +n['energy-kcal_100g'], protein: +n.proteins_100g || 0, carbs: +n.carbohydrates_100g || 0, fat: +n.fat_100g || 0, src: 'Open Food Facts' }); });
+      if (p.product_name && n['energy-kcal_100g'] != null) res.push({ name: p.product_name + (p.brands ? ' (' + p.brands.split(',')[0] + ')' : ''), kcal: +n['energy-kcal_100g'], protein: +n.proteins_100g || 0, carbs: +n.carbohydrates_100g || 0, fat: +n.fat_100g || 0, carb_type: (+n.sugars_100g || 0) > 0.5 * (+n.carbohydrates_100g || 0) ? 'FAST' : 'SLOW', src: 'Open Food Facts' }); });
   } catch (e) { if (!res.length) { box.innerHTML = '<div class="empty">Sin conexión: introduce los valores a mano.</div>'; return; } }
   S.results = res;
   box.innerHTML = res.length ? res.map((r, i) => `<button type="button" class="res" data-act="pickfood" data-i="${i}"><b>${esc(r.name)}</b>
@@ -1251,6 +1390,7 @@ const DEMO_MENU = {
   suplementos: [[['Whey protein', 30]]]
 };
 const DEMO_KG = [[/press banca/i, 60], [/militar/i, 18], [/apertura/i, 12], [/tr[ií]ceps/i, 25], [/jal[oó]n/i, 55], [/remo/i, 50], [/curl/i, 25], [/sentadilla/i, 80], [/rumano/i, 70], [/gemelo/i, 60]];
+const DEMO_FAST = new Set(['Plátano', 'Manzana', 'Patata cocida', 'Arroz cocido']);
 const pick = a => a[Math.floor(Math.random() * a.length)];
 function demoData(routine, today) {
   const foods = [], sets = [], weights = [], mon0 = mondayOf(today);
@@ -1261,7 +1401,7 @@ function demoData(routine, today) {
       const k = 0.92 + Math.random() * 0.2;
       pick(DEMO_MENU[meal]).forEach(([name, g0]) => {
         const g = Math.round(g0 * k / 5) * 5, m = DEMO_FOODS[name], f = g / 100;
-        foods.push({ day, meal, name, grams: g, kcal: r1(m[0] * f), protein: r1(m[1] * f), carbs: r1(m[2] * f), fat: r1(m[3] * f) });
+        foods.push({ day, meal, name, grams: g, kcal: r1(m[0] * f), protein: r1(m[1] * f), carbs: r1(m[2] * f), fat: r1(m[3] * f), carb_type: DEMO_FAST.has(name) ? 'FAST' : 'SLOW' });
       });
     });
     todays.forEach(e => {
@@ -1315,6 +1455,7 @@ function showTab(name) {
   if (name === 'nutri') { S.nutDay = S.nutDay || S.day; loadNutri(); maybeRemind(); }
   if (name === 'train') loadTrain().catch(e => toast(e.message, true));
   if (name === 'settings') fillSettings();
+  if (name === 'home') refreshNai();
 }
 $$('nav button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
  
@@ -1359,7 +1500,7 @@ document.addEventListener('click', async e => {
       case 'remindlater': remindLater(); break;
       case 'kcalfrommacros': $('#sKcal').value = Math.round(macroKcal()); break;
       case 'savesettings': {
-        const body = { kcal: num($('#sKcal').value), protein: num($('#sP').value), carbs: num($('#sC').value), fat: num($('#sF').value), level: $('#sLevel').value };
+        const body = { kcal: num($('#sKcal').value), protein: num($('#sP').value), carbs: num($('#sC').value), fat: num($('#sF').value), level: $('#sLevel').value, tolerance: $('#sTol').value };
         if ([body.kcal, body.protein, body.carbs, body.fat].some(isNaN)) { toast('Revisa los números', true); break; }
         S.settings = await post('/settings', body); applySettings(); await loadWorkout(); toast('Ajustes guardados ✓'); break; }
       case 'install': if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt = null; $('#installBox').hidden = true; } break;
@@ -1367,6 +1508,12 @@ document.addEventListener('click', async e => {
   } catch (err) { toast(err.message, true); }
 });
  
+$('#sTz').addEventListener('change', async () => {
+  try { localStorage.setItem(TZ_KEY, $('#sTz').value); } catch (e) {}
+  updTz(); await init(); toast('Zona horaria actualizada: ' + nowHM());
+});
+$('#fTime').addEventListener('input', () => { S.timeTouched = true; });
+$('#fMeal').addEventListener('change', () => { if (!S.timeTouched) $('#fTime').value = defTime(S.addCtx.day, $('#fMeal').value); });
 $('#scanCam').addEventListener('change', e => { scanImage(e.target.files[0]); e.target.value = ''; });
 $('#scanGal').addEventListener('change', e => { scanImage(e.target.files[0]); e.target.value = ''; });
 $('#q').addEventListener('input', () => { clearTimeout(qT); qT = setTimeout(searchFoods, 400); });
@@ -1398,7 +1545,8 @@ $('#foodForm').addEventListener('submit', async e => {
   try {
     const grams = num($('#fGrams').value);
     await post('/foods', { day: S.addCtx.day, meal: $('#fMeal').value, name: $('#fName').value.trim() || 'Alimento',
-      grams: isNaN(grams) ? 0 : grams, kcal: r.kcal, protein: r.p, carbs: r.c, fat: r.f });
+      grams: isNaN(grams) ? 0 : grams, kcal: r.kcal, protein: r.p, carbs: r.c, fat: r.f,
+      carb_type: $('#fCT').value, caffeine_mg: num($('#fCaf').value) || 0, timestamp: $('#fTime').value || undefined });
     $('#foodSheet').hidden = true; toast('Alimento añadido ✓'); await refreshFoods();
   } catch (err) { toast(err.message, true); }
 });
