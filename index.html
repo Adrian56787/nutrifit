@@ -1455,21 +1455,34 @@ function updPreview() {
 function fillFood(o) {
   $('#fName').value = o.name || $('#fName').value;
   [['fK', o.kcal], ['fP', o.protein], ['fC', o.carbs], ['fF', o.fat]].forEach(([id, v]) => { if (v != null && !isNaN(v)) $('#' + id).value = Math.round(v * 10) / 10; });
-  $('#fBasis').value = 'per100'; if (o.carb_type) $('#fCT').value = o.carb_type; updPreview();
+  $('#fBasis').value = 'per100'; if (o.carb_type) $('#fCT').value = o.carb_type; if (o.caffeine_mg != null) $('#fCaf').value = o.caffeine_mg; updPreview();
+}
+/* Productos y equivalencias locales: sirven aunque el proveedor externo esté caído o el buscador no indexe bien la marca. */
+const LOCAL_FOOD_CATALOG = [
+  { name: 'Bebida energética Furious Hacendado (Mercadona)', kcal: 48, protein: 0, carbs: 11.3, fat: 0, caffeine_mg: 32, carb_type: 'FAST', aliases: ['furious', 'furius', 'energy drink hacendado', 'bebida energetica hacendado'] },
+  { name: 'Plátano', kcal: 89, protein: 1.1, carbs: 23, fat: 0.3, carb_type: 'FAST', aliases: ['platano', 'banana'] },
+  { name: 'Arroz cocido', kcal: 130, protein: 2.7, carbs: 28, fat: 0.3, carb_type: 'SLOW', aliases: ['arroz'] },
+  { name: 'Pechuga de pollo', kcal: 165, protein: 31, carbs: 0, fat: 3.6, carb_type: 'SLOW', aliases: ['pollo'] },
+  { name: 'Huevos', kcal: 143, protein: 12.6, carbs: 0.7, fat: 9.5, carb_type: 'SLOW', aliases: ['huevo'] },
+  { name: 'Leche semidesnatada', kcal: 47, protein: 3.3, carbs: 4.8, fat: 1.6, carb_type: 'SLOW', aliases: ['leche'] }
+];
+const localFoodMatches = q => { const x = q.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); return LOCAL_FOOD_CATALOG.filter(f => [f.name, ...(f.aliases || [])].some(a => a.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(x) || x.includes(a.toLowerCase()))).map(f => ({ ...f, src: 'Catálogo local' })); };
+const offQueries = q => { const x = q.toLowerCase(); const a = [q]; if (/furi|furious|energ/.test(x)) a.push('Furious Hacendado', 'bebida energética Hacendado', 'energy drink Hacendado'); return [...new Set(a)]; };
+function offProductToFood(p) {
+  const n = p.nutriments || {}, kcal = n['energy-kcal_100g'] ?? (n.energy_100g != null ? +n.energy_100g / 4.184 : null);
+  if (!p.product_name || kcal == null) return null;
+  return { name: p.product_name + (p.brands ? ' (' + p.brands.split(',')[0] + ')' : ''), kcal: +kcal, protein: +n.proteins_100g || 0, carbs: +n.carbohydrates_100g || 0, fat: +n.fat_100g || 0, caffeine_mg: n.caffeine_100g != null ? +n.caffeine_100g * 10 : undefined, carb_type: (+n.sugars_100g || 0) > 0.5 * (+n.carbohydrates_100g || 0) ? 'FAST' : 'SLOW', src: 'Open Food Facts' };
 }
 let qT;
 async function searchFoods() {
   const q = $('#q').value.trim(), box = $('#results');
   if (q.length < 2) { box.innerHTML = ''; return; }
   box.innerHTML = '<div class="empty">Buscando…</div>';
-  let res = [];
-  try { res = (await api('/foods/history?q=' + encodeURIComponent(q))).map(r => ({ ...r, src: '⭐ Tus alimentos' })); } catch (e) {}
-  try {
-    const r = await fetchOpenFoodFactsUrl(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=8&lc=es&cc=es&fields=product_name,brands,nutriments`);
-    const j = await r.json();
-    (j.products || []).forEach(p => { const n = p.nutriments || {};
-      if (p.product_name && n['energy-kcal_100g'] != null) res.push({ name: p.product_name + (p.brands ? ' (' + p.brands.split(',')[0] + ')' : ''), kcal: +n['energy-kcal_100g'], protein: +n.proteins_100g || 0, carbs: +n.carbohydrates_100g || 0, fat: +n.fat_100g || 0, carb_type: (+n.sugars_100g || 0) > 0.5 * (+n.carbohydrates_100g || 0) ? 'FAST' : 'SLOW', src: 'Open Food Facts' }); });
-  } catch (e) { if (!res.length) { box.innerHTML = '<div class="empty">Sin conexión: introduce los valores a mano.</div>'; return; } }
+  let res = localFoodMatches(q);
+  try { res = (await api('/foods/history?q=' + encodeURIComponent(q))).map(r => ({ ...r, src: '⭐ Tus alimentos' })).concat(res); } catch (e) {}
+  try { for (const term of offQueries(q)) { const r = await fetchOpenFoodFactsUrl(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=8&lc=es&cc=es&fields=product_name,brands,nutriments`); const j = await r.json(); (j.products || []).map(offProductToFood).filter(Boolean).forEach(f => res.push(f)); } } catch (e) {}
+  const seen = new Set(); res = res.filter(f => { const k = (f.name || '').toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  if (!res.length) { box.innerHTML = '<div class="empty">Sin conexión o sin coincidencias: introduce los valores a mano.</div>'; return; }
   S.results = res;
   box.innerHTML = res.length ? res.map((r, i) => `<button type="button" class="res" data-act="pickfood" data-i="${i}"><b>${esc(r.name)}</b>
     <small>${fmt(r.kcal)} kcal · P ${fmt(r.protein)} · C ${fmt(r.carbs)} · G ${fmt(r.fat)} (por 100 g) · ${r.src}</small></button>`).join('')
@@ -1486,29 +1499,34 @@ function loadTess() {
     document.head.appendChild(s);
   });
 }
-async function prepImage(file) {
+async function prepImage(file, variant = 'contrast') {
   const img = await createImageBitmap(file), sc = Math.min(1.5, 2200 / Math.max(img.width, img.height));
   const c = document.createElement('canvas'); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
   const x = c.getContext('2d', { willReadFrequently: true });
-  x.filter = 'grayscale(1) contrast(1.8) brightness(1.08)'; x.drawImage(img, 0, 0, c.width, c.height);
-  const px = x.getImageData(0, 0, c.width, c.height), d = px.data;
-  // Binarización suave: conserva letras pequeñas y reduce reflejos del aluminio.
-  for (let i = 0; i < d.length; i += 4) { const v = d[i]; const bw = v > 190 ? 255 : v < 75 ? 0 : Math.round((v - 75) * 255 / 115); d[i] = d[i + 1] = d[i + 2] = bw; }
-  x.putImageData(px, 0, 0);
+  x.filter = variant === 'threshold' ? 'grayscale(1) contrast(2.2) brightness(1.12)' : 'grayscale(1) contrast(1.7) brightness(1.08)'; x.drawImage(img, 0, 0, c.width, c.height);
+  if (variant === 'threshold') {
+    const px = x.getImageData(0, 0, c.width, c.height), d = px.data;
+    for (let i = 0; i < d.length; i += 4) { const v = d[i]; const bw = v > 165 ? 255 : v < 95 ? 0 : Math.round((v - 95) * 255 / 70); d[i] = d[i + 1] = d[i + 2] = bw; }
+    x.putImageData(px, 0, 0);
+  }
   return c;
 }
 function parseLabel(raw) {
-  const t = raw.toLowerCase().replace(/[|[\]]/g, ' ').replace(/,/g, '.').replace(/\s+/g, ' ');
-  const number = '(\\d+(?:\\.\\d+)?)';
-  // Se busca el primer número tras la etiqueta; funciona con español, portugués e inglés.
-  const extract = pattern => { const m = t.match(new RegExp(pattern + '[\\s\\S]*?' + number, 'i')); return m ? parseFloat(m[1]) : null; };
-  const caffeine = extract('(?:cafe[ií]na|caffeine|cafeina)[^\\d]{0,30}') ?? extract('(?:mg\\s*/\\s*100\\s*ml|100\\s*ml)[^\\d]{0,20}');
+  const t = raw.toLowerCase().replace(/[|[\]]/g, ' ').replace(/,/g, '.').replace(/[oö]/g, '0').replace(/\s+/g, ' ');
+  const lines = t.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  const nums = line => [...line.matchAll(/\d+(?:\.\d+)?/g)].map(m => parseFloat(m[0])).filter(Number.isFinite);
+  const lineValue = patterns => { const line = lines.find(x => patterns.some(p => p.test(x))); if (!line) return null; const ns = nums(line); return ns.length ? ns[0] : null; };
+  const energyLine = lines.find(x => /energ[ií]a|energ[eé]tico|energia|kcal|kj/.test(x)) || '';
+  const kcalMatch = energyLine.match(/(\d+(?:\.\d+)?)\s*kcal/);
+  const kjMatch = energyLine.match(/(\d+(?:\.\d+)?)\s*kj/);
+  const kcal = kcalMatch ? +kcalMatch[1] : kjMatch ? +kjMatch[1] / 4.184 : lineValue([/kcal/]);
+  const caffeineMatch = t.match(/(\d+(?:\.\d+)?)\s*mg\s*\/\s*100\s*ml/) || t.match(/cafe[ií]na[^\d]{0,30}(\d+(?:\.\d+)?)/);
   return {
-    kcal: extract('(?:energ[ií]a|energ[eé]tico|energia|kcal|kj)[^\\d]{0,40}'),
-    protein: extract('(?:prote[ií]nas|proteinas|protein)[^\\d]{0,40}'),
-    carbs: extract('(?:hidratos|carbohidratos|carbos|carboidratos|carbohydrate)[^\\d]{0,40}'),
-    fat: extract('(?:grasas|grasa|l[ií]pidos|lipidos|gorduras|fat)[^\\d]{0,40}'),
-    caffeine_mg: caffeine
+    kcal,
+    protein: lineValue([/prote[ií]nas?/, /protein/, /proteínas/]),
+    carbs: lineValue([/hidratos/, /carbohidratos?/, /carboidratos?/, /carbos?/, /carbohydrate/]),
+    fat: lineValue([/grasas?/, /l[ií]pidos?/, /gorduras?/, /fat/]),
+    caffeine_mg: caffeineMatch ? +caffeineMatch[1] : null
   };
 }
 async function scanImage(file) {
@@ -1516,10 +1534,16 @@ async function scanImage(file) {
   const st = $('#scanStatus');
   try {
     st.textContent = 'Preparando imagen…';
-    const canvas = await prepImage(file);
     st.textContent = 'Cargando lector de texto…'; await loadTess();
-    const r = await Tesseract.recognize(canvas, 'spa+eng', { logger: m => { if (m.status === 'recognizing text') st.textContent = `Leyendo tabla… ${Math.round(m.progress * 100)}%`; }, tessedit_pageseg_mode: '6', preserve_interword_spaces: '1' });
-    const raw = r.data.text, p = parseLabel(raw);
+    const texts = [];
+    for (const variant of ['contrast', 'threshold']) {
+      const canvas = await prepImage(file, variant);
+      const r = await Tesseract.recognize(canvas, 'spa+eng', { logger: m => { if (m.status === 'recognizing text') st.textContent = `Leyendo tabla… ${Math.round(m.progress * 100)}%`; }, config: { tessedit_pageseg_mode: variant === 'contrast' ? '6' : '11', preserve_interword_spaces: '1' } });
+      texts.push(r.data.text);
+    }
+    const raw = texts.join('\n'), parsed = texts.map(parseLabel);
+    const first = key => parsed.map(x => x[key]).find(v => v != null && Number.isFinite(v));
+    const p = { kcal: first('kcal'), protein: first('protein'), carbs: first('carbs'), fat: first('fat'), caffeine_mg: first('caffeine_mg') };
     $('#ocrRaw pre').textContent = raw; $('#ocrRaw').hidden = false;
     fillFood({ ...p, name: '' }); if (p.caffeine_mg != null) $('#fCaf').value = Math.round(p.caffeine_mg * 10) / 10;
     const miss = [['kcal', 'kcal'], ['protein', 'proteínas'], ['carbs', 'carbohidratos'], ['fat', 'grasas']].filter(([k]) => p[k] == null).map(x => x[1]);
@@ -1877,13 +1901,15 @@ async function scanBarLoop() {
 
 async function fetchOpenFoodFacts(code) {
   toast('Buscando producto en Open Food Facts…', 'soft');
+  const known = { '8480000403223': LOCAL_FOOD_CATALOG[0], '8402001018855': LOCAL_FOOD_CATALOG[0] };
+  if (known[code]) { openFood(); fillFood(known[code]); $('#fName').value = known[code].name + ` (EAN: ${code})`; toast('Producto reconocido desde el catálogo local. Revisa y guarda.', 'soft'); return; }
   try {
     const r = await fetchOpenFoodFactsUrl(`https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(code)}.json`);
     const j = await r.json();
     if (j.status === 1 && j.product) {
       const p = j.product;
       const n = p.nutriments || {};
-      const name = p.product_name + (p.brands ? ' (' + p.brands.split(',')[0] + ')' : '');
+      const name = (p.product_name || p.product_name_es || 'Alimento') + (p.brands ? ' (' + p.brands.split(',')[0] + ')' : '');
       const kcal = n['energy-kcal_100g'] ?? n['energy_100g'] ?? 0;
       const protein = n.proteins_100g ?? 0;
       const carbs = n.carbohydrates_100g ?? 0;
