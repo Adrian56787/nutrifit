@@ -119,6 +119,16 @@ input[type=checkbox]{width:22px;height:22px;padding:0;accent-color:var(--g);flex
 .chk{display:flex;align-items:center;gap:10px;padding:8px 2px;font-size:16px}
 .btn.danger{background:#2a1417;color:#ff8a96;border-color:#4a1f25}
 [hidden]{display:none!important}
+/* rutina: colapsar días */
+.dayctl{display:flex;gap:6px;flex:none;align-items:center}
+.chevbtn{display:inline-flex;align-items:center;justify-content:center;width:36px;padding:6px 0;color:var(--g)}
+.chevbtn svg{width:18px;height:18px;display:block;transition:transform .25s ease}
+.chevbtn:not(.open) svg{transform:rotate(-90deg)}
+.daybody{display:grid;grid-template-rows:1fr;transition:grid-template-rows .28s ease}
+.daybody.collapsed{grid-template-rows:0fr}
+.dayin{min-height:0;overflow:hidden;padding-top:8px;transition:padding-top .28s ease}
+.daybody.collapsed .dayin{padding-top:0;visibility:hidden;transition:padding-top .28s ease,visibility 0s .28s}
+@media (prefers-reduced-motion:reduce){.daybody,.dayin,.chevbtn svg{transition:none!important}}
 /* glosario de fórmulas */
 #glosPanel{margin-top:12px;font-size:14.5px;line-height:1.5;color:#dbe7e0}
 #glosPanel h4{margin:18px 0 6px;font-size:15px;color:var(--g);letter-spacing:.01em}
@@ -1179,14 +1189,37 @@ function weekChart(el, days, readoutSel) {
   const cur = Math.min(5, wdIndex(S.day));
   show(cur);
 }
+/* Estado de colapso por día de la rutina (persistente en localStorage; respaldo en memoria si no está disponible). */
+const COLL_KEY = 'nutrifit.routineCollapsed';
+const CHEV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+let _collMem = null;
+function collapsedDays() {
+  if (_collMem) return _collMem;
+  try { const a = JSON.parse(localStorage.getItem(COLL_KEY)); _collMem = Array.isArray(a) ? a.map(Number) : []; } catch (e) { _collMem = []; }
+  return _collMem;
+}
+const isDayCollapsed = wd => collapsedDays().includes(wd);
+function toggleDay(wd) {
+  const set = new Set(collapsedDays()), collapse = !set.has(wd);
+  collapse ? set.add(wd) : set.delete(wd);
+  _collMem = [...set];
+  try { localStorage.setItem(COLL_KEY, JSON.stringify(_collMem)); } catch (e) {}
+  const card = $(`.daycard[data-wd="${wd}"]`); if (!card) return;       // sin re-render: así la transición CSS se anima
+  $('.daybody', card).classList.toggle('collapsed', collapse);
+  $('.dayin', card).inert = collapse;
+  const b = $('.chevbtn', card); b.classList.toggle('open', !collapse); b.setAttribute('aria-expanded', String(!collapse));
+}
 function renderRoutine() {
   const todayWd = wdIndex(S.day);
   const order = [todayWd, ...[0,1,2,3,4,5,6].filter(i => i !== todayWd)];
   const extras = S.routine.filter(e => e.weekday < 0);
   $('#routineList').innerHTML = order.map(wd => {
     const list = S.routine.filter(e => e.weekday === wd);
-    return `<div class="card"><div class="row" style="margin-bottom:8px"><h3 style="margin:0">${DAYS_FULL[wd]} ${wd === todayWd ? '<span class="chip">Hoy</span>' : ''}</h3>
-      <button class="btn sm" style="flex:none" data-act="newex" data-wd="${wd}">＋</button></div>
+    const col = isDayCollapsed(wd);
+    return `<div class="card daycard" data-wd="${wd}"><div class="row"><h3 style="margin:0">${DAYS_FULL[wd]} ${wd === todayWd ? '<span class="chip">Hoy</span>' : ''}</h3>
+      <div class="dayctl"><button class="btn sm" data-act="newex" data-wd="${wd}" aria-label="Añadir ejercicio">＋</button>
+        <button class="btn sm chevbtn ${col ? '' : 'open'}" data-act="toggleday" data-wd="${wd}" aria-expanded="${!col}" aria-label="Mostrar u ocultar los ejercicios del día">${CHEV}</button></div></div>
+      <div class="daybody ${col ? 'collapsed' : ''}"><div class="dayin" ${col ? 'inert' : ''}>
       ${list.length ? list.map((e, i) => `<div class="item"><div class="t"><div class="n">${esc(e.name)}</div>
         <div class="m">${esc(e.muscle)} · ${e.sets} × ${e.target_reps} · RIR ${e.target_rir} · ${e.kind}</div></div>
         <div style="display:flex;gap:4px;flex:none">
@@ -1194,7 +1227,7 @@ function renderRoutine() {
           <button class="btn sm" data-act="movex" data-id="${e.id}" data-dir="1" ${i === list.length - 1 ? 'disabled style="opacity:.3"' : ''}>↓</button>
           <button class="btn sm" data-act="editex" data-id="${e.id}">✏️</button>
           <button class="trash" style="width:34px;height:34px;font-size:15px" data-act="delex" data-id="${e.id}">🗑</button></div></div>`).join('')
-        : '<div class="empty">Descanso</div>'}</div>`;
+        : '<div class="empty">Descanso</div>'}</div></div></div>`;
   }).join('') + (extras.length ? extrasCard(extras) : '');
 }
 function extrasCard(list) {
@@ -1559,6 +1592,7 @@ document.addEventListener('click', async e => {
       case 'editex': openEx(S.routine.find(x => x.id === +d.id)); break;
       case 'delex': if (confirm('¿Eliminar este ejercicio y todo su historial?')) { await api('/routine/' + d.id, { method: 'DELETE' }); await loadTrain(); await loadWorkout(); toast('Ejercicio eliminado'); } break;
       case 'movex': await post(`/routine/${d.id}/move`, { dir: +d.dir }); await loadTrain(); await loadWorkout(); break;
+      case 'toggleday': toggleDay(+d.wd); break;
       case 'opendata': openData(); break;
       case 'dscope': DM.scope = d.v; updDataPreview(); break;
       case 'doreset': await doReset(); break;
