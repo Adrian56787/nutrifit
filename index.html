@@ -54,8 +54,16 @@ label.f{display:block;font-size:12px;color:var(--mut);margin-bottom:10px}label.f
 .mb-h{display:flex;justify-content:space-between;align-items:baseline;font-size:13px}
 .mb-h{gap:6px}.mb-h b{font-size:13px;white-space:nowrap}.mb-h .rem{font-size:16px;font-weight:800;color:var(--g);white-space:nowrap}
 .rem small{font-size:10px;font-weight:600;margin-right:3px;color:inherit;opacity:.75}
-.wline{margin-top:10px;padding-top:8px;border-top:1px solid var(--line);font-size:14px;display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline}
-.wline b{color:var(--g);font-size:16px}.wline small{color:var(--mut)}.over{color:var(--warn)!important}
+.over{color:var(--warn)!important}
+/* renglones de una sola línea: hora ideal de entreno y peso medio */
+.ideal,.wrow{display:flex;align-items:baseline;gap:6px;white-space:nowrap;overflow:hidden;border-radius:12px;font-size:13px}
+.ideal{padding:9px 12px;background:#0e231a;border:1px solid #1f5a3e;box-shadow:0 0 14px rgba(29,245,143,.12);color:var(--txt)}
+.ideal .il{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ideal .it{flex:none;color:var(--g);font-weight:800;font-size:14px;text-shadow:0 0 10px rgba(29,245,143,.35)}
+.ideal .ig{flex:0 10 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--mut);font-size:12px}
+.wrow{padding:8px 12px;background:var(--card);border:1px solid var(--line);color:var(--mut)}
+.wrow .wm{flex:none;color:var(--txt)}.wrow .wm small{color:var(--txt);font-size:13px}.wrow .wm b{color:var(--g);font-size:14px}
+.wrow .wt{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12px}
 .bar{height:8px;background:#1a2420;border-radius:6px;overflow:hidden;margin-top:2px}
 .bar i{display:block;height:100%;border-radius:6px;transition:width .4s}
 .bar i.p{background:#1df58f}.bar i.c{background:#6ee7b7}.bar i.f{background:#059669}.bar i.over{background:var(--warn)}
@@ -169,6 +177,14 @@ input[type=checkbox]{width:22px;height:22px;padding:0;accent-color:var(--g);flex
 details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120px;overflow:auto}
 #toast{position:fixed;left:50%;bottom:calc(var(--nav) + 18px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#16241d;border:1px solid var(--g2);color:var(--txt);padding:10px 16px;border-radius:12px;z-index:90;font-weight:600;max-width:90%;display:none}
 #toast.err{border-color:var(--bad);background:#2a1417}
+#toast.soft{border-color:#6b5a2a;background:#1a1810;color:#f1e6c4;font-weight:500;font-size:14px;line-height:1.35}
+/* escáner de códigos de barras */
+.barview{position:relative;aspect-ratio:4/3;background:#000;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:8px}
+.barview video{width:100%;height:100%;object-fit:cover;display:block}
+.barguide{position:absolute;left:10%;right:10%;top:32%;bottom:32%;border:2px solid var(--g);border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.4),0 0 16px rgba(29,245,143,.45);pointer-events:none}
+.barguide::after{content:"";position:absolute;left:6%;right:6%;top:50%;height:2px;background:var(--g);opacity:.8;animation:barscan 1.6s ease-in-out infinite alternate}
+@keyframes barscan{from{transform:translateY(-28px)}to{transform:translateY(28px)}}
+@media (prefers-reduced-motion:reduce){.barguide::after{animation:none}}
 </style>
 </head>
 <body>
@@ -177,8 +193,10 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
   <section id="tab-home" class="tab active">
     <div class="blockA">
       <div class="card" id="summary"></div>
+      <div class="ideal" id="idealRow" aria-live="polite"></div>
       <button class="btn pri big" data-act="addfood">＋ Agregar comida</button>
       <button class="btn big" data-act="addweight">⚖️ Agregar peso corporal</button>
+      <div class="wrow" id="weightRow"></div>
     </div>
     <div class="blockB card" id="workout"></div>
   </section>
@@ -353,6 +371,7 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
       <label class="btn big" style="margin:0">📷 Cámara<input type="file" accept="image/*" capture="environment" id="scanCam" hidden></label>
       <label class="btn big" style="margin:0">🖼️ Galería<input type="file" accept="image/*" id="scanGal" hidden></label>
     </div>
+    <button type="button" class="btn big" data-act="barcode" style="margin-bottom:8px;border-color:var(--g2);color:var(--g)">📷 Escanear código de barras</button>
     <div class="mut" id="scanStatus" style="margin-bottom:8px;font-size:14px">Fotografía la tabla nutricional del envase (valores por 100 g).</div>
     <details id="ocrRaw" hidden><summary class="mut">Texto leído</summary><pre></pre></details>
   </div>
@@ -383,6 +402,14 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
   </form>
 </div></div>
  
+<!-- Hoja: escáner de códigos de barras -->
+<div class="sheet" id="barSheet" hidden><div class="sheet-body">
+  <div class="sheet-h"><h3>📷 Código de barras</h3><button class="x" data-act="barclose" aria-label="Cerrar">✕</button></div>
+  <div class="barview"><video id="barVideo" playsinline muted></video><div class="barguide"></div></div>
+  <div class="mut" id="barStatus" style="margin-bottom:10px;font-size:14px">Apunta al código de barras del envase.</div>
+  <div class="row"><input id="barManual" inputmode="numeric" placeholder="O escribe el código (EAN/UPC)" autocomplete="off"><button type="button" class="btn pri" style="flex:none" data-act="barmanual">Buscar</button></div>
+</div></div>
+
 <!-- Hoja: ejercicio -->
 <div class="sheet" id="exSheet" hidden><div class="sheet-body">
   <div class="sheet-h"><h3 id="exTitle">Ejercicio</h3><button class="x" data-act="closesheet">✕</button></div>
@@ -507,8 +534,8 @@ const dLabel = s => { const d = parseDate(s); return `${d.getDate()} ${MONTHS[d.
  
 let toastT;
 function toast(msg, err) {
-  const t = $('#toast'); t.textContent = msg; t.className = err ? 'err' : ''; t.style.display = 'block';
-  clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', 2400);
+  const t = $('#toast'); t.textContent = msg; t.className = err === 'soft' ? 'soft' : err ? 'err' : ''; t.style.display = 'block';
+  clearTimeout(toastT); toastT = setTimeout(() => t.style.display = 'none', err === 'soft' ? 4800 : 2400);   // 'soft' = aviso suave, no bloqueante
 }
 const MODE = { local: false };
 async function api(path, opts = {}) {
@@ -937,13 +964,48 @@ function weightStats() {
   const cur = w.filter(x => x.day >= from && x.day <= S.day), prev = w.filter(x => x.day >= pFrom && x.day < from);
   return { avg: avg(cur), n: cur.length, prevAvg: avg(prev), last: w[w.length - 1] };
 }
-function weightLine() {
+/* Renglón compacto (1 línea): ⚖️ Peso medio (7d): 80,5 kg · (6 reg.) · ▲ 0,3 kg vs sem. anterior */
+function renderWeightRow() {
+  const el = $('#weightRow'); if (!el) return;
   const s = weightStats();
-  if (!s) return `<div class="wline">⚖️ <small>Sin peso registrado: usa «Agregar peso corporal»</small></div>`;
-  if (s.avg === null) return `<div class="wline">⚖️ <small>Sin registros esta semana · último:</small> <b>${fmt(s.last.kg)} kg</b> <small>(${dLabel(s.last.day)})</small></div>`;
-  const d = s.prevAvg === null ? null : Math.round((s.avg - s.prevAvg) * 10) / 10;
-  const trend = d === null ? '' : d === 0 ? ' · = que la semana anterior' : ` · ${d > 0 ? '▲' : '▼'} ${fmt(Math.abs(d))} kg vs semana anterior`;
-  return `<div class="wline">⚖️ <small>Peso medio (7 días)</small> <b>${fmt(s.avg)} kg</b> <small>${s.n} registro${s.n > 1 ? 's' : ''}${trend}</small></div>`;
+  let main, tail = '';
+  if (!s) main = '<small>Sin peso registrado</small>';
+  else if (s.avg === null) { main = `<small>Último peso:</small> <b>${fmt(s.last.kg)} kg</b>`; tail = `· ${dLabel(s.last.day)} · sin registros en 7d`; }
+  else {
+    const d = s.prevAvg === null ? null : Math.round((s.avg - s.prevAvg) * 10) / 10;
+    main = `<small>Peso medio (7d):</small> <b>${fmt(s.avg)} kg</b>`;
+    tail = `· (${s.n} reg.)` + (d === null ? '' : d === 0 ? ' · = sem. anterior' : ` · ${d > 0 ? '▲' : '▼'} ${fmt(Math.abs(d))} kg vs sem. anterior`);
+  }
+  el.innerHTML = `<span class="wm">⚖️ ${main}</span>${tail ? `<span class="wt">${tail}</span>` : ''}`;
+}
+/* ---- Hora ideal para entrenar ----
+   Barre el resto del día (pasos de 5 min) con la misma cinética del NAI (carbos rápidos/lentos, buffer gástrico,
+   cafeína y techo de saturación) usando las comidas de hoy, y devuelve el rango contiguo en torno al pico
+   (≥ 90 % del NAI máximo). Funciona igual con servidor y en modo local. */
+function idealWindow() {
+  const foods = (S.foods || []).map(f => ({ ...f, day: S.day }));
+  if (!foods.length) return null;
+  const lw = lastWeight(), weight = (lw && lw.kg) || (S.settings.profile && S.settings.profile.weight) || 75;
+  const tol = S.settings.tolerance || 'media';
+  const [h, m] = nowHM().split(':').map(Number), from = Math.ceil((h * 60 + m) / 5) * 5;
+  const hm = x => `${pad(Math.floor(x / 60))}:${pad(x % 60)}`, pts = [];
+  for (let x = from; x < 1440; x += 5) pts.push({ x, r: naiCompute(foods, S.day, hm(x), weight, tol) });
+  if (!pts.length) return { none: true };
+  let k = 0; pts.forEach((p, i) => { if (p.r.nai > pts[k].r.nai) k = i; });
+  const peak = pts[k].r; if (peak.nai <= 0) return { none: true };
+  const thr = peak.nai * 0.9; let l = k, r = k;
+  while (l > 0 && pts[l - 1].r.nai >= thr) l--;
+  while (r < pts.length - 1 && pts[r + 1].r.nai >= thr) r++;
+  const label = peak.state === 'depleted' ? 'Reservas bajas' : peak.state === 'low' ? 'Energía moderada'
+    : (peak.caffeine_effect > 0.01 ? 'Pico de glucógeno + cafeína' : 'Pico de glucógeno');
+  return { start: l === 0 ? 'Ahora' : hm(pts[l].x) + ' h', end: hm(pts[r].x + (l === r ? 5 : 0)) + ' h', label };
+}
+function renderIdeal() {
+  const el = $('#idealRow'); if (!el) return;
+  const w = idealWindow();
+  el.innerHTML = !w ? '<span class="il">⚡ Hora ideal para entrenar:</span><span class="ig">registra una comida para calcularla</span>'
+    : w.none ? '<span class="il">⚡ Hora ideal para entrenar:</span><span class="ig">sin pico próximo · registra tu próxima comida</span>'
+    : `<span class="il">⚡ Hora ideal para entrenar hoy:</span><span class="it">${w.start} - ${w.end}</span><span class="ig">(${w.label})</span>`;
 }
 function renderSummary() {
   const t = sumFoods(S.foods), st = S.settings, C = 2 * Math.PI * 46;
@@ -953,7 +1015,8 @@ function renderSummary() {
       <circle class="ring-fg ${over ? 'over' : ''}" cx="55" cy="55" r="46" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}" transform="rotate(-90 55 55)"/>
       <text x="55" y="53" font-size="21">${fmt(t.kcal)}</text>
       <text x="55" y="68" font-size="9.5" style="fill:#8aa196;font-weight:600">de ${fmt(st.kcal)} kcal</text></svg>
-    <div class="bars">${macroBar('Proteínas', 'p', t.p, st.protein)}${macroBar('Carbohidratos', 'c', t.c, st.carbs)}${macroBar('Grasas', 'f', t.f, st.fat)}</div></div>${weightLine()}`;
+    <div class="bars">${macroBar('Proteínas', 'p', t.p, st.protein)}${macroBar('Carbohidratos', 'c', t.c, st.carbs)}${macroBar('Grasas', 'f', t.f, st.fat)}</div></div>`;
+  renderWeightRow(); renderIdeal();
 }
 const foodRow = (f, showMeal) => `<div class="item"><div class="t"><div class="n">${esc(f.name)}</div>
   <div class="m">${showMeal ? esc(f.meal) + ' · ' : ''}${f.timestamp ? f.timestamp.slice(11, 16) + ' · ' : ''}${f.grams ? fmt(f.grams) + ' g · ' : ''}${f.carb_type === 'FAST' ? '⚡ ' : ''}P ${fmt(f.protein)} · C ${fmt(f.carbs)} · G ${fmt(f.fat)}${f.caffeine_mg ? ' · ☕ ' + fmt(f.caffeine_mg) + ' mg' : ''}</div></div>
@@ -1707,6 +1770,9 @@ async function init() {
   } catch (e) { toast(e.message, true); renderSummary(); renderWorkout(); }
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && S.day !== todayStr()) init(); });
+/* La hora ideal depende de «ahora»: se recalcula cada minuto y al volver a la app. */
+setInterval(renderIdeal, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) renderIdeal(); });
 renderSummary(); renderWorkout();
 init();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('service-worker.js').catch(() => {});
