@@ -119,6 +119,19 @@ input[type=checkbox]{width:22px;height:22px;padding:0;accent-color:var(--g);flex
 .chk{display:flex;align-items:center;gap:10px;padding:8px 2px;font-size:16px}
 .btn.danger{background:#2a1417;color:#ff8a96;border-color:#4a1f25}
 [hidden]{display:none!important}
+/* glosario de fórmulas */
+#glosPanel{margin-top:12px;font-size:14.5px;line-height:1.5;color:#dbe7e0}
+#glosPanel h4{margin:18px 0 6px;font-size:15px;color:var(--g);letter-spacing:.01em}
+#glosPanel h4:first-child{margin-top:4px}
+#glosPanel p{margin:0 0 8px}
+#glosPanel ul{margin:0 0 8px;padding-left:18px}#glosPanel li{margin-bottom:4px}
+#glosPanel b{color:#fff}
+#glosPanel .fx{background:#0b100f;border:1px solid #1d3a2c;border-left:3px solid var(--g);border-radius:10px;padding:10px 12px;margin:8px 0;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13.5px;line-height:1.7;color:#eaf3ee;overflow-x:auto;white-space:nowrap}
+#glosPanel .fx i{font-style:italic;color:var(--g)}
+#glosPanel .fx sub{font-size:.75em}
+#glosPanel .note{font-size:12.5px;color:var(--mut)}
+#glosPanel .tag{display:inline-block;padding:1px 8px;border-radius:99px;background:#12201a;border:1px solid #1d3a2c;color:var(--g);font-size:11.5px;font-weight:700;margin-right:4px}
 .btn.acc{display:flex;justify-content:space-between;align-items:center;text-align:left}
 .btn.acc .chev{transition:transform .2s;color:var(--g)}.btn.acc[aria-expanded=true] .chev{transform:rotate(180deg)}
 #nutPanel{margin-top:12px}.nsub{font-size:13px;color:var(--mut);margin:14px 0 8px;text-transform:uppercase;letter-spacing:.04em}
@@ -257,6 +270,57 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
       <select id="sTz"></select></label>
       <div class="preview" id="tzNow" style="margin:8px 0 0"></div></div>
     <div class="card"><button class="btn big" data-act="info">ℹ️ ¿Qué es la sobrecarga progresiva?</button></div>
+    <div class="card">
+      <button class="btn big acc" data-act="toggleglos" aria-expanded="false" aria-controls="glosPanel"><span>📖 Glosario de Fórmulas y Algoritmos</span><span class="chev">▾</span></button>
+      <div id="glosPanel" hidden>
+
+        <h4>A · Metabolismo basal (BMR / TMB)</h4>
+        <p>Calorías que quema tu cuerpo en reposo absoluto. Es la base de todo el cálculo: <b>BMR → TDEE → kcal objetivo → macros</b>.</p>
+        <ul>
+          <li><span class="tag">Estándar</span><b>Mifflin-St Jeor</b>: estima el BMR con peso, altura, edad y sexo. Es el más fiable si no conoces tu composición corporal.</li>
+          <li><span class="tag">Avanzado</span><b>Katch-McArdle</b>: usa solo tu <b>masa magra</b> (el tejido que realmente gasta energía). Es más preciso en atletas, porque dos personas con el mismo peso pueden tener músculo y grasa muy distintos. Requiere el % de grasa.</li>
+        </ul>
+        <div class="fx"><i>Mifflin</i> = 10·Peso + 6,25·Altura − 5·Edad + 5 <span class="note">(hombre; −161 en mujer)</span></div>
+        <div class="fx"><i>Masa magra</i> = Peso × (1 − %Grasa / 100)<br><i>BMR</i> = 370 + (21,6 × <i>Masa magra</i> en kg)</div>
+        <div class="fx"><i>TDEE</i> = BMR × Factor de actividad<br><i>kcal objetivo</i> = TDEE × (1 + Ajuste %)</div>
+        <p class="note">Factores de actividad: 1,2 · 1,375 · 1,55 · 1,725. Proteína = g/kg × peso; grasas por g/kg o % de kcal; los carbohidratos son las kcal restantes (4 kcal/g P y C · 9 kcal/g grasa).</p>
+
+        <h4>B · Fuerza teórica y e1RM (Epley)</h4>
+        <p>El <b>e1RM</b> es el peso máximo que podrías levantar una sola vez, estimado a partir de una serie submáxima. Combina el <b>peso</b>, las <b>repeticiones</b> y el <b>RIR</b> (repeticiones que te quedaban en reserva): sumar el RIR convierte tus reps «reales» en reps «hasta el fallo», de modo que una serie a RIR 3 y otra a RIR 0 se comparan en igualdad de condiciones.</p>
+        <div class="fx"><i>e1RM</i> = Peso × ( 1 + (Reps + RIR) / 30 )</div>
+        <p>Invirtiendo la fórmula, la app calcula el peso con el que lograrías tus reps objetivo al RIR deseado:</p>
+        <div class="fx"><i>Peso objetivo</i> = e1RM / ( 1 + (Reps<sub>obj</sub> + RIR<sub>obj</sub>) / 30 )</div>
+        <p class="note">Sobrecarga progresiva = que tu e1RM suba con el tiempo, ya sea con más peso, más reps o menos RIR.</p>
+
+        <h4>C · Índice de Disponibilidad Energética (NAI)</h4>
+        <p>Estima cuánta energía de carbohidratos tienes «en el depósito» en el momento de entrenar, según lo que comiste en los <b>15–180 min previos</b> a la sesión (fuera de esa ventana, la comida no cuenta):</p>
+        <ul>
+          <li><b>Tipo de carbohidrato:</b> los <b>rápidos</b> (FAST) llegan al máximo a los 35–40 min; los <b>lentos</b> (SLOW), a los 70–90 min.</li>
+          <li><b>Buffer gástrico:</b> las grasas y proteínas de la misma comida retrasan el vaciado del estómago y amortiguan los carbohidratos lentos (hasta −50 %).</li>
+          <li><b>Cafeína:</b> su efecto máximo llega a los ~45 min y se escala con tu peso y tu tolerancia (tope +15 %).</li>
+          <li><b>Techo de saturación:</b> el glucógeno muscular no se llena sin límite; los carbohidratos efectivos se recortan a un máximo que depende de tu peso.</li>
+        </ul>
+        <div class="fx"><i>F<sub>buffer</sub></i> = 1,0 − mín( 0,5 ; (Grasas·1,5 + Proteínas·0,5) / (Carbohidratos + 1) )</div>
+        <div class="fx"><i>NAI</i> = [ (C<sub>fast</sub>·k<sub>fast</sub>(t)) + (C<sub>slow</sub>·k<sub>slow</sub>(t)·<i>F<sub>buffer</sub></i>) ] × ( 1 + EfectoCafeína(t) )</div>
+        <div class="fx"><i>C<sub>efectivos</sub></i> = mín( Σ carbohidratos activos ; techo )<br><i>techo</i> = clamp( 1,5 × Peso ; 60 ; 150 ) g<br><i>NAI<sub>base</sub></i> = clamp( 0,5 × Peso ; 25 ; 80 ) g</div>
+        <p class="note">Según el cociente NAI / NAI<sub>base</sub> la app clasifica tu estado: <b>reservas bajas</b> (&lt; 0,25), <b>energía moderada</b> (&lt; 0,6), <b>óptimo</b> y <b>máximo</b> (≥ 1,8). Las comidas se agrupan por comida (desayuno, almuerzo…) para calcular el F<sub>buffer</sub>.</p>
+
+        <h4>D · Carga recomendada (sobrecarga + nutrición)</h4>
+        <p>La carga sugerida parte de tu histórico <b>puro</b> y suma la progresión de la sesión más un pequeño empujón (o freno) nutricional, acotado a ±5 %:</p>
+        <div class="fx"><i>W<sub>rec</sub></i> = W<sub>hist</sub> × ( 1 + Progreso<sub>base</sub> + β·(NAI − NAI<sub>base</sub>) )</div>
+        <div class="fx">β = 0,0003 por gramo · β·ΔNAI ∈ [ −5 % ; +5 % ]</div>
+        <ul>
+          <li><b>Reservas bajas:</b> la carga nunca sube respecto a la anterior (−2 % si vas casi en ayunas).</li>
+          <li><b>Energía moderada:</b> no se supera la carga previa.</li>
+          <li><b>Máximo:</b> salto extra solo si cumpliste las reps y RIR ≥ 1 (tope +5 %).</li>
+        </ul>
+
+        <h4>E · Aislamiento del histórico (variables limpias)</h4>
+        <p>Cada serie guarda tu peso real <b>y</b> el modificador nutricional agudo de ese día. Al comparar sesiones, la app lo resta para que el histórico refleje tu capacidad neuromuscular, sin ruido de picos puntuales de glucógeno:</p>
+        <div class="fx"><i>W<sub>hist</sub></i> = Peso<sub>levantado</sub> / ( 1 + β·ΔNAI<sub>ese día</sub> )</div>
+        <p class="note">Se aplica igual al e1RM, al score de rendimiento y a las gráficas de progreso.</p>
+      </div>
+    </div>
     <div class="card"><button class="btn big" data-act="opendata">🧹 Gestionar datos (borrar / ejemplo)</button></div>
     <div class="card" id="installBox" hidden><button class="btn big" data-act="install">📲 Instalar app en la pantalla de inicio</button></div>
     <p class="mut c"><small id="modeNote">NutriFit</small></p>
@@ -764,10 +828,13 @@ const NUTRI_FB = {
    · low      → nunca por encima de la carga previa
    · depleted → mantener la carga previa (o −2 % si es ayuno casi total)
    · max      → modificador + un salto extra (solo si cumpliste las reps la vez anterior) */
+/* Histórico puro: el peso guardado es el real; el modificador agudo (β·ΔNAI) de aquel día se guarda aparte en `nai_mod`
+   y se resta aquí, así la fuerza a largo plazo no arrastra picos puntuales de glucógeno. */
+const pureKg = s => s.kg / (1 + (s.nai_mod || 0));
 function suggest(prev, ex, level, nai) {
   if (!prev) return null;
   const R = ex.target_reps, T = ex.target_rir;
-  const pk = prev.kg / (1 + (prev.nai_mod || 0));                       // W_histórico puro (sin el empujón nutricional de aquel día)
+  const pk = pureKg(prev);                                              // W_histórico puro (sin el empujón nutricional de aquel día)
   const est = e1rm(pk, prev.reps, prev.rir);
   const wTarget = est / (1 + (R + T) / 30);                             // peso para R reps a RIR T
   const [lo, hi] = STEPS[level][ex.kind === 'compuesto' ? 'comp' : 'iso'];
@@ -784,7 +851,10 @@ function suggest(prev, ex, level, nai) {
     why = 'Mantén la carga';
   }
   const st = nai ? nai.state : 'optimal', mod = nai ? nai.mod : 0;
-  let wr = w * (1 + mod);
+  /* W_rec = W_hist × (1 + progreso_base + β·(NAI − NAI_base))  → los dos términos se SUMAN (no se encadenan):
+     progreso_base = w/W_hist − 1 ; mod = β·ΔNAI, ya acotado a ±5 % en el cálculo del NAI. */
+  const prog = w / pk - 1;
+  let wr = pk * (1 + prog + mod);
   if (st === 'depleted') {
     wr = Math.min(wr, nai.fasted ? prev.kg * 0.98 : prev.kg);
     why = nai.fasted ? 'Sin carbos recientes: −2 %' : 'Pocos carbos recientes: no subas';
@@ -1493,7 +1563,7 @@ document.addEventListener('click', async e => {
       case 'dscope': DM.scope = d.v; updDataPreview(); break;
       case 'doreset': await doReset(); break;
       case 'demo': await loadDemo(); break;
-      case 'togglenut': { const p = $('#nutPanel'); p.hidden = !p.hidden; el.setAttribute('aria-expanded', String(!p.hidden)); break; }
+      case 'togglenut': case 'toggleglos': { const p = $('#' + el.getAttribute('aria-controls')); p.hidden = !p.hidden; el.setAttribute('aria-expanded', String(!p.hidden)); break; }
       case 'protpreset': $('#nProt').value = d.v; schedCalc(); break;
       case 'saveprofile': await saveProfile(); break;
       case 'remindsave': await remindSave(); break;
