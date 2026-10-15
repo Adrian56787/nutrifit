@@ -1460,6 +1460,7 @@ function fillFood(o) {
 /* Productos y equivalencias locales: sirven aunque el proveedor externo esté caído o el buscador no indexe bien la marca. */
 const LOCAL_FOOD_CATALOG = [
   { name: 'Bebida energética Furious Hacendado (Mercadona)', kcal: 48, protein: 0, carbs: 11.3, fat: 0, caffeine_mg: 32, carb_type: 'FAST', aliases: ['furious', 'furius', 'energy drink hacendado', 'bebida energetica hacendado'] },
+  { name: 'Bebida energética Furious Zero Hacendado (Mercadona)', kcal: 2.9, protein: 0, carbs: 0.1, fat: 0, caffeine_mg: 32, carb_type: 'FAST', aliases: ['furious zero', 'furius zero', 'zero furious', 'furious sin azúcar', 'furious sin azucar'] },
   { name: 'Plátano', kcal: 89, protein: 1.1, carbs: 23, fat: 0.3, carb_type: 'FAST', aliases: ['platano', 'banana'] },
   { name: 'Arroz cocido', kcal: 130, protein: 2.7, carbs: 28, fat: 0.3, carb_type: 'SLOW', aliases: ['arroz'] },
   { name: 'Pechuga de pollo', kcal: 165, protein: 31, carbs: 0, fat: 3.6, carb_type: 'SLOW', aliases: ['pollo'] },
@@ -1544,6 +1545,12 @@ async function scanImage(file) {
     const raw = texts.join('\n'), parsed = texts.map(parseLabel);
     const first = key => parsed.map(x => x[key]).find(v => v != null && Number.isFinite(v));
     const p = { kcal: first('kcal'), protein: first('protein'), carbs: first('carbs'), fat: first('fat'), caffeine_mg: first('caffeine_mg') };
+    // Las tablas de bebidas cero suelen mezclar dos columnas y provocan falsos positivos del OCR.
+    // Si el nombre del envase es reconocible, los valores del catálogo verificado tienen prioridad.
+    const ocrName = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const furious = ocrName.includes('furious') || ocrName.includes('furius');
+    const zero = /zero|sin azucar|0 azucar|sugar free/.test(ocrName);
+    if (furious) Object.assign(p, zero ? LOCAL_FOOD_CATALOG[1] : LOCAL_FOOD_CATALOG[0]);
     $('#ocrRaw pre').textContent = raw; $('#ocrRaw').hidden = false;
     fillFood({ ...p, name: '' }); if (p.caffeine_mg != null) $('#fCaf').value = Math.round(p.caffeine_mg * 10) / 10;
     const miss = [['kcal', 'kcal'], ['protein', 'proteínas'], ['carbs', 'carbohidratos'], ['fat', 'grasas']].filter(([k]) => p[k] == null).map(x => x[1]);
@@ -1901,8 +1908,9 @@ async function scanBarLoop() {
 
 async function fetchOpenFoodFacts(code) {
   toast('Buscando producto en Open Food Facts…', 'soft');
-  const known = { '8480000403223': LOCAL_FOOD_CATALOG[0], '8402001018855': LOCAL_FOOD_CATALOG[0] };
-  if (known[code]) { openFood(); fillFood(known[code]); $('#fName').value = known[code].name + ` (EAN: ${code})`; toast('Producto reconocido desde el catálogo local. Revisa y guarda.', 'soft'); return; }
+  const cleanCode = String(code).replace(/\D/g, '');
+  const known = { '8480000403223': LOCAL_FOOD_CATALOG[0], '8402001018855': LOCAL_FOOD_CATALOG[1] };
+  if (known[cleanCode]) { openFood(); fillFood(known[cleanCode]); $('#fName').value = known[cleanCode].name + ` (EAN: ${cleanCode})`; toast('Producto reconocido desde el catálogo local. Revisa y guarda.', 'soft'); return; }
   try {
     const r = await fetchOpenFoodFactsUrl(`https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(code)}.json`);
     const j = await r.json();
@@ -1941,4 +1949,3 @@ async function openUnknownBarcode(code, offline = false) {
 </script>
 </body>
 </html>
-
