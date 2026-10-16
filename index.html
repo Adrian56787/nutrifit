@@ -1146,13 +1146,27 @@ function renderAx() {
 function showNewExtra() { $('#axName').value = $('#axq').value.trim(); $('#axForm').hidden = false; renderSeriesCfg('ax', $('#axSets').value, [], []); $('#axName').focus(); }
 async function addExtra(id) {
   if (!S.extraIds.includes(id)) S.extraIds.push(id);
-  const catalogEx = S.catalog.find(e => e.id === id) || S.routine.find(e => e.id === id);
-  if (catalogEx && catalogEx.weekday < 0) {
-    try { await post('/routine/' + id, { weekday: wdIndex(S.day), name: catalogEx.name, muscle: catalogEx.muscle, kind: catalogEx.kind, sets: catalogEx.sets, target_reps: catalogEx.target_reps, target_rir: catalogEx.target_rir }, 'PUT'); catalogEx.weekday = wdIndex(S.day); S.extraIds = S.extraIds.filter(x => x !== id); } catch (e) {}
-  }
   await loadWorkout();
   S.exIdx = Math.max(0, S.workout.exercises.findIndex(e => e.id === id)); renderWorkout();
   $('#addExSheet').hidden = true; toast('Ejercicio añadido al entreno de hoy');
+}
+async function persistExtraExercises() {
+  const ids = [...new Set(S.extraIds || [])]; if (!ids.length) return 0;
+  const wd = wdIndex(S.day), routine = await api('/routine'); let saved = 0;
+  for (const id of ids) {
+    const ex = routine.find(x => String(x.id) === String(id));
+    if (!ex || ex.weekday === wd) continue;
+    await post('/routine/' + id, { weekday: wd, name: ex.name, muscle: ex.muscle, kind: ex.kind, sets: ex.sets, target_reps: ex.target_reps, target_rir: ex.target_rir }, 'PUT');
+    saved++;
+  }
+  S.extraIds = []; return saved;
+}
+async function nextExercise() {
+  const last = S.exIdx === S.workout.exercises.length - 1;
+  if (!last) { goEx(S.exIdx + 1); return; }
+  const saved = await persistExtraExercises();
+  if (saved) { await loadWorkout(); S.exIdx = S.workout.exercises.length; renderWorkout(); toast(`${saved} ejercicio${saved === 1 ? '' : 's'} añadido${saved === 1 ? '' : 's'} a la rutina fija`); }
+  else { S.exIdx++; renderWorkout(); }
 }
 async function saveSet(n) {
   const ex = curEx(), r = ex && ex.rows[n - 1]; if (!r) return;
@@ -1722,7 +1736,7 @@ document.addEventListener('click', async e => {
       case 'pickex': await addExtra(+d.id); break;
       case 'newextra': showNewExtra(); break;
       case 'gotoex': goEx(+d.i); break;
-      case 'nextex': goEx(S.exIdx + 1); break;
+      case 'nextex': await nextExercise(); break;
       case 'prevex': goEx(Math.max(0, Math.min(S.exIdx, S.workout.exercises.length) - 1)); break;
       case 'nutview': S.nutView = d.v; await loadNutri(); break;
       case 'nutshift': S.nutDay = addDays(S.nutDay, +d.n); await loadNutri(); break;
