@@ -350,6 +350,14 @@ details pre{white-space:pre-wrap;font-size:11px;color:var(--mut);max-height:120p
         <p class="note">Se aplica igual al e1RM, al score de rendimiento y a las gráficas de progreso.</p>
       </div>
     </div>
+    <div class="card">
+      <h3>💾 Copia de seguridad</h3>
+      <div class="preview" id="bkInfo" style="text-align:left;font-size:13px;margin-bottom:10px"></div>
+      <button class="btn pri big" data-act="exportbk" style="margin-bottom:8px">⬇️ Exportar copia de seguridad (JSON)</button>
+      <label class="btn big" style="margin:0 0 8px">⬆️ Restaurar / Importar copia de seguridad<input type="file" accept=".json,application/json" id="bkFile" hidden></label>
+      <button class="btn big" data-act="restoreauto">🕘 Restaurar último respaldo automático</button>
+      <p class="mut" style="margin:8px 0 0"><small>Se guarda un respaldo automático en el navegador cada vez que completas una serie o una sesión. Exporta el JSON de vez en cuando y guárdalo fuera del dispositivo.</small></p>
+    </div>
     <div class="card"><button class="btn big" data-act="opendata">🧹 Gestionar datos (borrar / ejemplo)</button></div>
     <div class="card" id="installBox" hidden><button class="btn big" data-act="install">📲 Instalar app en la pantalla de inicio</button></div>
     <p class="mut c"><small id="modeNote">NutriFit</small></p>
@@ -558,7 +566,11 @@ async function fetchOpenFoodFactsUrl(url, options = {}) {
   } finally { clearTimeout(timer); }
 }
 async function api(path, opts = {}) {
-  if (MODE.local) return localApi(path, opts);
+  if (MODE.local) {
+    const r = localApi(path, opts);
+    if ((opts.method || 'GET').toUpperCase() !== 'GET' && !path.startsWith('/profile/calc')) await flushStorage();   // la escritura debe estar confirmada
+    return r;
+  }
   let r;
   try {
     r = await fetch('/api' + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
@@ -590,13 +602,126 @@ const SEED = [
   [2,'Espalda','Jalón al pecho','compuesto',4,8,2], [2,'Espalda','Remo con barra','compuesto',3,10,2], [2,'Bíceps','Curl con barra Z','aislamiento',3,12,2],
   [4,'Cuádriceps','Sentadilla','compuesto',4,8,2], [4,'Femoral','Peso muerto rumano','compuesto',3,10,2], [4,'Gemelo','Elevación de gemelos','aislamiento',4,15,2]
 ];
-let _mem = null;                                              // respaldo si localStorage no está disponible
-const lsave = d => { _mem = d; try { localStorage.setItem(LS_KEY, JSON.stringify(d)); } catch (e) {} };
+/* ================= almacenamiento: IndexedDB (con respaldo en localStorage) =================
+   Object stores: routine · sets · foods · weights · settings (main/seq/seriesTargets) · backups (snapshots JSON).
+   La app trabaja sobre una copia en memoria (_mem) y cada cambio se escribe en IndexedDB de forma diferencial. */
+const IDB_NAME = 'nutrifit', IDB_VER = 1;
+const IDB_STORES = { routine: 'id', sets: 'id', foods: 'id', weights: 'day', settings: 'key', backups: 'key' };
+const DATA_STORES = ['routine', 'sets', 'foods', 'weights', 'settings'];
+const BK_LS_KEY = 'nutrifit.backup.latest';
+const STORE = { db: null, ok: false, loaded: false, sig: {}, chain: Promise.resolve(), err: null, lastBackup: null, persisted: null, migrated: false };
+let _mem = null;
+function idbOpen() {
+  return new Promise((ok, ko) => {
+    if (!window.indexedDB) return ko(new Error('IndexedDB no disponible'));
+    let rq; try { rq = indexedDB.open(IDB_NAME, IDB_VER); } catch (e) { return ko(e); }
+    rq.onupgradeneeded = () => { const db = rq.result; Object.entries(IDB_STORES).forEach(([n, k]) => { if (!db.objectStoreNames.contains(n)) db.createObjectStore(n, { keyPath: k }); }); };
+    rq.onsuccess = () => ok(rq.result);
+    rq.onerror = () => ko(rq.error || new Error('No se pudo abrir IndexedDB'));
+    rq.onblocked = () => ko(new Error('IndexedDB bloqueada por otra pestaña'));
+  });
+}
+function idbRead(name, key) {
+  return new Promise((ok, ko) => {
+    const tx = STORE.db.transaction(name, 'readonly'), rq = key === undefined ? tx.objectStore(name).getAll() : tx.objectStore(name).get(key);
+    tx.oncomplete = () => ok(rq.result); tx.onerror = tx.onabort = () => ko(tx.error || new Error('Lectura cancelada'));
+  });
+}
+function idbPut(name, rec) {
+  return new Promise((ok, ko) => {
+    const tx = STORE.db.transaction(name, 'readwrite'); tx.objectStore(name).put(rec);
+    tx.oncomplete = () => ok(); tx.onerror = tx.onabort = () => ko(tx.error || new Error('Escritura cancelada'));
+  });
+}
+const dbToRecords = d => ({
+  routine: d.routine, sets: d.sets, foods: d.foods,
+  weights: Object.entries(d.weights).map(([day, kg]) => ({ day, kg })),
+  settings: [{ key: 'main', value: d.settings }, { key: 'seq', value: d.seq }, { key: 'seriesTargets', value: d.seriesTargets || {} }]
+});
+const sigOf = (rec, name) => new Map(rec.map(r => [r[IDB_STORES[name]], JSON.stringify(r)]));
+/* Escritura diferencial: solo se escriben los registros nuevos/cambiados y se borran los que ya no existen. */
+async function idbWriteDiff(d) {
+  const rec = dbToRecords(d), plan = {}; let any = false;
+  DATA_STORES.forEach(n => {
+    const old = STORE.sig[n] || new Map(), next = sigOf(rec[n], n), puts = [], dels = [];
+    rec[n].forEach(r => { if (old.get(r[IDB_STORES[n]]) !== next.get(r[IDB_STORES[n]])) puts.push(r); });
+    old.forEach((_, k) => { if (!next.has(k)) dels.push(k); });
+    plan[n] = { puts, dels, next }; if (puts.length || dels.length) any = true;
+  });
+  if (!any) return;
+  await new Promise((ok, ko) => {
+    const tx = STORE.db.transaction(DATA_STORES, 'readwrite');
+    DATA_STORES.forEach(n => { const os = tx.objectStore(n); plan[n].puts.forEach(r => os.put(r)); plan[n].dels.forEach(k => os.delete(k)); });
+    tx.oncomplete = () => ok(); tx.onerror = tx.onabort = () => ko(tx.error || new Error('Escritura cancelada'));
+  });
+  DATA_STORES.forEach(n => { STORE.sig[n] = plan[n].next; });
+}
+/* Las escrituras se encadenan (orden garantizado). Si fallan, el error queda en STORE.err y flushStorage() lo lanza. */
+function persistDB(d) {
+  if (!STORE.loaded) return STORE.chain;
+  STORE.chain = STORE.chain.then(async () => {
+    STORE.err = null;
+    try { if (STORE.ok) await idbWriteDiff(d); else localStorage.setItem(LS_KEY, JSON.stringify(d)); }
+    catch (e) { STORE.err = e; console.error('Error al guardar', e); }
+  });
+  return STORE.chain;
+}
+async function flushStorage() {
+  await STORE.chain;
+  if (STORE.err) throw new Error('No se pudo escribir en el almacenamiento del dispositivo: ' + (STORE.err.message || STORE.err));
+}
+const lsave = d => { _mem = d; persistDB(d); };
+/* Fuerza tipos numéricos puros en todos los registros (evita "80" frente a 80 en e1RM, scores y comparaciones). */
+function normalizeDB(d) {
+  const N = x => { const v = Number(x); return Number.isFinite(v) ? v : 0; };
+  d.settings = d.settings && typeof d.settings === 'object' ? d.settings : {};
+  d.routine = (d.routine || []).map(e => ({ ...e, id: N(e.id), weekday: N(e.weekday), sets: N(e.sets), target_reps: N(e.target_reps), target_rir: N(e.target_rir), position: N(e.position) }));
+  d.sets = (d.sets || []).map(x => ({ ...x, id: N(x.id), exercise_id: N(x.exercise_id), set_no: N(x.set_no), kg: N(x.kg), reps: N(x.reps), rir: N(x.rir), nai_mod: N(x.nai_mod) }));
+  d.foods = (d.foods || []).map(f => ({ ...f, id: N(f.id), grams: N(f.grams), kcal: N(f.kcal), protein: N(f.protein), carbs: N(f.carbs), fat: N(f.fat), caffeine_mg: N(f.caffeine_mg) }));
+  const w = {}; Object.entries(d.weights || {}).forEach(([k, v]) => { if (N(v) > 0) w[k] = N(v); }); d.weights = w;
+  const mx = a => a.reduce((m, x) => Math.max(m, x.id), 0), q = d.seq || {};
+  d.seq = { foods: Math.max(N(q.foods), mx(d.foods)), routine: Math.max(N(q.routine), mx(d.routine)), sets: Math.max(N(q.sets), mx(d.sets)) };
+  d.seriesTargets = d.seriesTargets && typeof d.seriesTargets === 'object' ? d.seriesTargets : {};
+  return d;
+}
+/* Arranque: abre IndexedDB, carga los datos y, si está vacía, migra los de localStorage (la copia antigua no se borra). */
+async function loadStorage() {
+  if (STORE.loaded) return;
+  try { STORE.db = await idbOpen(); STORE.ok = true; } catch (e) { STORE.ok = false; STORE.err = e; }
+  let d = null, fromIdb = false;
+  if (STORE.ok) {
+    try {
+      const [routine, sets, foods, weights, settings] = await Promise.all(DATA_STORES.map(n => idbRead(n)));
+      const get = k => (settings.find(x => x.key === k) || {}).value;
+      if (get('main')) {
+        d = { settings: get('main'), seq: get('seq'), seriesTargets: get('seriesTargets'), routine, sets, foods, weights: Object.fromEntries(weights.map(w => [w.day, w.kg])) };
+        const rec = dbToRecords(d); DATA_STORES.forEach(n => { STORE.sig[n] = sigOf(rec[n], n); }); fromIdb = true;
+      }
+    } catch (e) { STORE.ok = false; STORE.err = e; }
+  }
+  if (!d) { try { d = JSON.parse(localStorage.getItem(LS_KEY)); } catch (e) { d = null; } STORE.migrated = !!d && STORE.ok; }
+  if (d) {
+    if (!d.seriesTargets) { try { d.seriesTargets = JSON.parse(localStorage.getItem(SERIES_TARGETS_KEY)) || {}; } catch (e) { d.seriesTargets = {}; } }
+    normalizeDB(d);
+  }
+  _mem = d; STORE.loaded = true;
+  if (!d) ldb(); else if (!fromIdb || STORE.ok) persistDB(d);
+  try { await flushStorage(); } catch (e) { toast(e.message, true); }
+  if (STORE.migrated) toast('Datos migrados a IndexedDB ✓', 'soft');
+}
+async function requestPersistence() {
+  try {
+    if (navigator.storage && navigator.storage.persist) {
+      STORE.persisted = (navigator.storage.persisted && await navigator.storage.persisted()) || await navigator.storage.persist();
+    }
+  } catch (e) { STORE.persisted = null; }
+  fillBackupInfo();
+}
 function ldb() {
   let d = _mem;
-  if (!d) { try { d = JSON.parse(localStorage.getItem(LS_KEY)); } catch (e) { d = null; } }
+  if (!d) { try { d = JSON.parse(localStorage.getItem(LS_KEY)); } catch (e) { d = null; } if (d) normalizeDB(d); }
   if (!d) {
-    d = { settings: { kcal: 2400, protein: 150, carbs: 280, fat: 70, level: 'intermedio' }, foods: [], routine: [], sets: [], weights: {}, seq: { foods: 0, routine: 0, sets: 0 } };
+    d = { settings: { kcal: 2400, protein: 150, carbs: 280, fat: 70, level: 'intermedio' }, foods: [], routine: [], sets: [], weights: {}, seq: { foods: 0, routine: 0, sets: 0 }, seriesTargets: {} };
     const pos = {};
     SEED.forEach(([weekday, muscle, name, kind, sets, target_reps, target_rir]) => {
       pos[weekday] = (pos[weekday] || 0) + 1;
@@ -605,6 +730,78 @@ function ldb() {
     lsave(d);
   }
   _mem = d; return d;
+}
+/* ---- Copias de seguridad ---- */
+async function collectBackup() {
+  const base = { app: 'nutrifit', version: 2, exported: new Date().toISOString() };
+  if (MODE.local) { const d = JSON.parse(JSON.stringify(ldb())); return { ...base, source: 'local', data: d }; }
+  const [routine, weights, settings] = await Promise.all([api('/routine'), api('/weights'), api('/settings')]);
+  let st = {}; try { st = JSON.parse(localStorage.getItem(SERIES_TARGETS_KEY)) || {}; } catch (e) {}
+  return { ...base, source: 'server', partial: true, data: { settings, routine, weights: Object.fromEntries(weights.map(w => [w.day, w.kg])), sets: S.sets || [], foods: S.foods || [], seriesTargets: st } };
+}
+async function writeBackup(key) {
+  const snap = await collectBackup(), rec = { key, ts: Date.now(), payload: snap };
+  if (STORE.ok) {
+    if (key === 'latest') { const prev = await idbRead('backups', 'latest'); if (prev) await idbPut('backups', { ...prev, key: 'previous' }); }
+    await idbPut('backups', rec);
+  } else { localStorage.setItem(BK_LS_KEY, JSON.stringify(rec)); }
+  if (key === 'latest') STORE.lastBackup = rec.ts;
+  fillBackupInfo();
+}
+let bkT = 0;
+/* Autoguardado JSON: tras cada serie guardada / sesión completada (con un pequeño margen para agrupar cambios). */
+function scheduleBackup(now) { clearTimeout(bkT); bkT = setTimeout(() => writeBackup('latest').catch(e => console.warn('Respaldo automático fallido', e)), now ? 0 : 800); }
+async function readLatestBackup() {
+  try {
+    if (STORE.ok) return await idbRead('backups', 'latest') || null;
+    return JSON.parse(localStorage.getItem(BK_LS_KEY));
+  } catch (e) { return null; }
+}
+async function fillBackupInfo() {
+  const el = $('#bkInfo'); if (!el) return;
+  const last = STORE.lastBackup || ((await readLatestBackup()) || {}).ts;
+  const when = last ? new Date(last).toLocaleString('es-ES', { timeZone: getTZ(), dateStyle: 'medium', timeStyle: 'short' }) : 'aún no hay';
+  el.innerHTML = `Almacenamiento: <b>${MODE.local ? (STORE.ok ? 'IndexedDB' : 'localStorage (IndexedDB no disponible)') : 'servidor'}</b><br>`
+    + `Persistente: <b>${STORE.persisted === null ? 'no soportado' : STORE.persisted ? 'sí ✓' : 'no concedido'}</b><br>Último respaldo automático: <b>${esc(when)}</b>`
+    + (MODE.local ? '' : '<br><small>En modo servidor la copia incluye rutina, peso, ajustes y los datos de hoy.</small>');
+}
+async function exportBackup() {
+  const snap = await collectBackup();
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' }));
+  a.download = `nutrifit-backup-${todayStr()}.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast('Copia exportada ✓');
+}
+async function importServer(x) {
+  if (x.settings && x.settings.profile) await post('/profile', { ...x.settings.profile, day: x.settings.profile.updated || S.day });
+  if (x.settings) await post('/settings', { kcal: x.settings.kcal, protein: x.settings.protein, carbs: x.settings.carbs, fat: x.settings.fat, level: x.settings.level, tolerance: x.settings.tolerance });
+  await post('/reset', { foods: true, sets: true, weights: true });
+  for (const e of await api('/routine')) await api('/routine/' + e.id, { method: 'DELETE' });
+  const idMap = {}, targets = {};
+  for (const e of (x.routine || []).slice().sort((a, b) => a.weekday - b.weekday || a.position - b.position)) {
+    const c = await post('/routine', { weekday: e.weekday, name: e.name, muscle: e.muscle, kind: e.kind, sets: e.sets, target_reps: e.target_reps, target_rir: e.target_rir });
+    idMap[e.id] = Number(c.id); if (x.seriesTargets && x.seriesTargets[e.id]) targets[c.id] = x.seriesTargets[e.id];
+  }
+  try { const all = JSON.parse(localStorage.getItem(SERIES_TARGETS_KEY)) || {}; localStorage.setItem(SERIES_TARGETS_KEY, JSON.stringify({ ...all, ...targets })); } catch (e) {}
+  const w = Array.isArray(x.weights) ? x.weights : Object.entries(x.weights || {}).map(([day, kg]) => ({ day, kg }));
+  await post('/bulk', { foods: x.foods || [], weights: w, sets: (x.sets || []).filter(t => idMap[t.exercise_id]).map(t => ({ ...t, exercise_id: idMap[t.exercise_id] })) });
+}
+async function importBackup(payload) {
+  if (!payload || payload.app !== 'nutrifit' || !payload.data || typeof payload.data !== 'object') throw new Error('El archivo no es una copia de seguridad válida de NutriFit');
+  const x = payload.data;
+  ['routine', 'sets', 'foods'].forEach(k => { if (x[k] !== undefined && !Array.isArray(x[k])) throw new Error('Copia dañada: «' + k + '» no es una lista'); });
+  try { await writeBackup('pre-import'); } catch (e) {}                          // red de seguridad: estado anterior a la restauración
+  if (MODE.local) {
+    const w = Array.isArray(x.weights) ? Object.fromEntries(x.weights.map(t => [t.day, t.kg])) : (x.weights || {});
+    const d = normalizeDB({ settings: { kcal: 2400, protein: 150, carbs: 280, fat: 70, level: 'intermedio', ...(x.settings || {}) }, routine: x.routine || [], sets: x.sets || [], foods: x.foods || [], weights: w, seq: x.seq, seriesTargets: x.seriesTargets });
+    lsave(d); await flushStorage();
+  } else await importServer(x);
+  S.settings = await api('/settings'); S.extraIds = [];
+  await refreshAll(); await emitStateChange({ scope: 'all' }); applySettings(); scheduleBackup(true);
+}
+async function restoreAuto() {
+  const rec = await readLatestBackup(); if (!rec) { toast('No hay respaldo automático todavía', true); return; }
+  if (!confirm('Se restaurará el respaldo automático del ' + new Date(rec.ts).toLocaleString('es-ES') + ' y se reemplazarán los datos actuales. ¿Continuar?')) return;
+  await importBackup(rec.payload); toast('Respaldo restaurado ✓');
 }
 function lfail(msg) { throw new Error(msg); }
 function lnum(v, lo, hi, name) { const x = num(v); if (isNaN(x) || x < lo || x > hi) lfail((name || 'Valor') + ' no válido'); return x; }
@@ -777,7 +974,7 @@ function localApi(path, opts = {}) {
       if (method === 'POST') { const b = lroutine(body), e = { id: ++d.seq.routine, ...b, position: nextPos(b.weekday) }; d.routine.push(e); return done(e); }
       const ex = d.routine.find(e => e.id === id); if (!ex) lfail('Ejercicio no encontrado');
       if (method === 'PUT') { const b = lroutine(body); const pos = b.weekday === ex.weekday ? ex.position : nextPos(b.weekday); Object.assign(ex, b, { position: pos }); return done({ ok: true }); }
-      if (method === 'DELETE') { d.routine = d.routine.filter(e => e.id !== id); d.sets = d.sets.filter(s => s.exercise_id !== id); return done({ ok: true }); }
+      if (method === 'DELETE') { d.routine = d.routine.filter(e => e.id !== id); d.sets = d.sets.filter(s => s.exercise_id !== id); if (d.seriesTargets) delete d.seriesTargets[id]; return done({ ok: true }); }
       break;
     }
     case 'workout': {
@@ -861,14 +1058,18 @@ const S = {
   day: todayStr(), settings: { kcal: 2400, protein: 150, carbs: 280, fat: 70, level: 'intermedio' },
   foods: [], workout: null, exIdx: 0, extraIds: [], catalog: [],
   tab: 'home', nutView: 'day', nutDay: todayStr(), nutFoods: [], weeks: [], weights: [],
-  routine: [], nai: null, metric: 'e1rm', addCtx: { day: todayStr(), meal: 'almuerzo' }, results: [], progData: []
+  routine: [], sets: [], nai: null, metric: 'e1rm', addCtx: { day: todayStr(), meal: 'almuerzo' }, results: [], progData: []
 };
  
 /* ================= motor de sobrecarga progresiva ================= */
 const e1rm = (kg, reps, rir) => kg * (1 + (reps + rir) / 30);          // Epley (1985) con RIR
 const SERIES_TARGETS_KEY = 'nutrifit.seriesTargets.v1';
-function seriesTargets(ex) { let all = {}; try { all = JSON.parse(localStorage.getItem(SERIES_TARGETS_KEY)) || {}; } catch (e) {} const a = all[ex.id] || {}; return { reps: Array.from({ length: ex.sets }, (_, i) => +(a.reps?.[i] || ex.target_reps)), rir: Array.from({ length: ex.sets }, (_, i) => +(a.rir?.[i] ?? ex.target_rir)) }; }
-function saveSeriesTargets(id, reps, rir) { let all = {}; try { all = JSON.parse(localStorage.getItem(SERIES_TARGETS_KEY)) || {}; } catch (e) {} all[id] = { reps, rir }; try { localStorage.setItem(SERIES_TARGETS_KEY, JSON.stringify(all)); } catch (e) {} }
+function allTargets() { if (MODE.local) return ldb().seriesTargets || (ldb().seriesTargets = {}); try { return JSON.parse(localStorage.getItem(SERIES_TARGETS_KEY)) || {}; } catch (e) { return {}; } }
+function seriesTargets(ex) { const a = allTargets()[ex.id] || {}; return { reps: Array.from({ length: ex.sets }, (_, i) => +(a.reps?.[i] || ex.target_reps)), rir: Array.from({ length: ex.sets }, (_, i) => +(a.rir?.[i] ?? ex.target_rir)) }; }
+function saveSeriesTargets(id, reps, rir) {
+  if (MODE.local) { const d = ldb(); (d.seriesTargets || (d.seriesTargets = {}))[id] = { reps, rir }; lsave(d); return; }
+  const all = allTargets(); all[id] = { reps, rir }; try { localStorage.setItem(SERIES_TARGETS_KEY, JSON.stringify(all)); } catch (e) {}
+}
 function renderSeriesCfg(prefix, sets, reps = [], rir = []) { const box = $('#' + prefix + 'SeriesCfg'); if (!box) return; box.innerHTML = `<div class="mut" style="font-size:12px;margin:4px 0">Objetivo específico por serie</div>${Array.from({ length: Math.max(1, Math.min(12, +sets || 1)) }, (_, i) => `<div class="row" style="margin-bottom:5px"><small style="width:58px;flex:none">Serie ${i + 1}</small><input data-sercfg="reps" data-i="${i}" inputmode="numeric" placeholder="Reps" value="${reps[i] ?? 10}"><input data-sercfg="rir" data-i="${i}" inputmode="numeric" placeholder="RIR" value="${rir[i] ?? 2}"></div>`).join('')}`; }
 function readSeriesCfg(prefix) { return [...document.querySelectorAll(`#${prefix}SeriesCfg [data-sercfg]`)].reduce((a, e) => { const i = +e.dataset.i; (a[e.dataset.sercfg] ||= [])[i] = Math.max(0, Math.round(num(e.value) || 0)); return a; }, {}); }
 const STEPS = {                                                         // [mín, máx] kg por semana
@@ -1055,7 +1256,7 @@ const curEx = () => S.workout && S.workout.exercises[S.exIdx];
 function rowFor(ex, n) {
   const targets = seriesTargets(ex), targetReps = targets.reps[n - 1] || ex.target_reps, targetRir = targets.rir[n - 1] ?? ex.target_rir;
   const done = ex.today.find(s => s.set_no === n), sug = getSuggestion(ex, n);
-  if (done) return { kg: String(done.kg), reps: String(done.reps), rir: String(done.rir), setId: done.id, sug, done: true, dirty: false, touched: true };
+  if (done) return { kg: String(done.kg), reps: String(done.reps), rir: String(done.rir), sug, done: true, dirty: false, touched: true };
   const prevRow = ex.rows[n - 2];
   return { kg: sug ? String(sug.kg) : prevRow ? prevRow.kg : '', reps: String(targetReps), rir: String(targetRir), sug, done: false, dirty: false, touched: false };
 }
@@ -1090,7 +1291,7 @@ function renderWorkout() {
   }).join('');
   box.innerHTML = `<div class="wk-h"><div style="min-width:0"><b>${esc(ex.name)}</b>
       <div><span class="chip mut">${esc(ex.muscle)}</span> <small>Ej. ${S.exIdx + 1}/${total} · ${ex.today.length}/${ex.rows.length} series · obj. ${ex.target_reps} reps @ RIR ${ex.target_rir}${tgt ? ` · ~${fmt(tgt)} kg` : ''}</small></div></div>
-      <button class="info-btn" data-act="info" aria-label="Información">i</button></div>
+      <div style="display:flex;gap:6px;flex:none"><button class="info-btn" data-act="editcur" aria-label="Editar ejercicio">✏️</button><button class="info-btn" data-act="delcur" aria-label="Eliminar ejercicio" style="border-color:#4a1f25;background:#2a1417">🗑</button><button class="info-btn" data-act="info" aria-label="Información">i</button></div></div>
     ${ex.prev.length ? '' : `<div class="mut" style="font-size:12.5px">Primera vez: elige un peso con el que logres ${ex.target_reps} reps a RIR ${ex.target_rir}.</div>`}
     <div class="shead"><span></span><span>Kg</span><span>Reps</span><span>RIR</span><span></span><span></span></div>
     ${rows}
@@ -1144,68 +1345,148 @@ function renderAx() {
     + `<button type="button" class="btn big" data-act="newextra" style="margin-top:6px">＋ Crear ${raw ? '«' + esc(raw) + '»' : 'ejercicio nuevo'}</button>`;
 }
 function showNewExtra() { $('#axName').value = $('#axq').value.trim(); $('#axForm').hidden = false; renderSeriesCfg('ax', $('#axSets').value, [], []); $('#axName').focus(); }
-async function addExtra(id) {
-  if (!S.extraIds.includes(id)) S.extraIds.push(id);
-  const routine = await api('/routine'), ex = routine.find(x => String(x.id) === String(id));
-  if (!ex) throw new Error('No se encontró el ejercicio seleccionado');
-  const wd = wdIndex(S.day);
-  if (ex.weekday !== wd) {
-    await post('/routine/' + id, { weekday: wd, name: ex.name, muscle: ex.muscle, kind: ex.kind, sets: ex.sets, target_reps: ex.target_reps, target_rir: ex.target_rir }, 'PUT');
+/* Un ejercicio añadido desde Inicio puede quedar como cambio definitivo en la rutina del día de la semana actual (wd). */
+async function offerPersistExercise(ex) {
+  const wd = wdIndex(S.day), dia = DAYS_FULL[wd];
+  if (!confirm(`¿Guardar «${ex.name}» como cambio definitivo en tu rutina del ${dia.toLowerCase()}?\n\nAceptar: queda en la rutina fija y aparece en la pestaña Entrenar.\nCancelar: solo se hace hoy.`)) { toast('Ejercicio añadido solo a hoy'); return; }
+  let finalId = ex.id;
+  const body = { weekday: wd, name: ex.name, muscle: ex.muscle, kind: ex.kind, sets: ex.sets, target_reps: ex.target_reps, target_rir: ex.target_rir };
+  if (ex.weekday < 0) await post('/routine/' + ex.id, body, 'PUT');        // extra sin día: pasa al día de hoy (conserva su historial)
+  else {                                                                     // ya pertenece a otro día: se copia al de hoy
+    const t = seriesTargets(ex), c = await post('/routine', body);
+    finalId = Number(c.id); saveSeriesTargets(finalId, t.reps, t.rir);
   }
-  S.extraIds = S.extraIds.filter(x => String(x) !== String(id));
+  S.extraIds = S.extraIds.filter(i => i !== ex.id);
+  await emitStateChange({ scope: 'routine' });
+  S.exIdx = Math.max(0, S.workout.exercises.findIndex(e => e.id === finalId)); renderWorkout();
+  scheduleBackup(); toast(`Guardado en la rutina del ${dia.toLowerCase()} ✓`);
+}
+async function addExtra(id) {
+  id = Number(id);
+  if (!S.extraIds.includes(id)) S.extraIds.push(id);
   await loadWorkout();
   S.exIdx = Math.max(0, S.workout.exercises.findIndex(e => e.id === id)); renderWorkout();
-  $('#addExSheet').hidden = true; toast('Ejercicio añadido a la rutina fija de ' + DAYS_FULL[wd]);
+  $('#addExSheet').hidden = true;
+  const ex = S.workout.exercises.find(e => e.id === id);
+  if (ex && ex.weekday !== wdIndex(S.day)) await offerPersistExercise(ex); else toast('Ejercicio añadido al entreno de hoy');
 }
-async function persistExtraExercises() {
-  const ids = [...new Set(S.extraIds || [])]; if (!ids.length) return 0;
-  const wd = wdIndex(S.day), routine = await api('/routine'); let saved = 0;
-  for (const id of ids) {
-    const ex = routine.find(x => String(x.id) === String(id));
-    if (!ex || ex.weekday === wd) continue;
-    await post('/routine/' + id, { weekday: wd, name: ex.name, muscle: ex.muscle, kind: ex.kind, sets: ex.sets, target_reps: ex.target_reps, target_rir: ex.target_rir }, 'PUT');
-    saved++;
+/* Si el número de series de Inicio difiere del de la rutina, ofrece guardarlo como cambio definitivo. */
+async function offerSetsPersist(ex) {
+  const n = ex.rows.length; if (n === ex.sets || ex._askedSets === n) return;
+  ex._askedSets = n;
+  const where = ex.weekday >= 0 ? ` de tu rutina del ${DAYS_FULL[ex.weekday].toLowerCase()}` : ' de tus ejercicios extra';
+  if (!confirm(`¿Guardar ${n} series para «${ex.name}» como cambio definitivo${where}?\n\nAceptar: la rutina base pasa a ${n} series.\nCancelar: solo cambia hoy.`)) return;
+  await post('/routine/' + ex.id, { weekday: ex.weekday, name: ex.name, muscle: ex.muscle, kind: ex.kind, sets: n, target_reps: ex.target_reps, target_rir: ex.target_rir }, 'PUT');
+  await emitStateChange({ scope: 'routine' }); toast(`Rutina actualizada: ${n} series ✓`);
+}
+async function deleteCurrentExercise() {
+  const ex = curEx(); if (!ex) return;
+  const wd = wdIndex(S.day);
+  if (ex.weekday === wd || ex.weekday < 0) {
+    if (!confirm(`¿Eliminar «${ex.name}» de la rutina y todo su historial (también del registro de hoy)?`)) return;
+    const old = { weekday: ex.weekday, name: ex.name, muscle: ex.muscle, kind: ex.kind, sets: ex.sets, target_reps: ex.target_reps, target_rir: ex.target_rir };
+    await api('/routine/' + ex.id, { method: 'DELETE' }); S.extraIds = S.extraIds.filter(i => i !== ex.id);
+    await emitStateChange({ scope: 'routine' }); scheduleBackup();
+    toast('Ejercicio eliminado de la rutina y del registro', null, async () => { await post('/routine', old); await emitStateChange({ scope: 'routine' }); });
+  } else {                                                                    // pertenece a otro día: solo se quita de hoy
+    if (!confirm(`«${ex.name}» es de tu rutina del ${DAYS_FULL[ex.weekday].toLowerCase()}. ¿Quitarlo solo del entreno de hoy (y borrar sus series de hoy)?`)) return;
+    for (const t of ex.today) await api('/sets/' + t.id, { method: 'DELETE' });
+    S.extraIds = S.extraIds.filter(i => i !== ex.id);
+    await emitStateChange({ scope: 'routine' }); scheduleBackup(); toast('Ejercicio quitado de hoy');
   }
-  S.extraIds = []; return saved;
 }
 async function nextExercise() {
   const last = S.exIdx === S.workout.exercises.length - 1;
   if (!last) { goEx(S.exIdx + 1); return; }
-  const saved = await persistExtraExercises();
-  if (saved) { await loadWorkout(); S.exIdx = S.workout.exercises.length; renderWorkout(); toast(`${saved} ejercicio${saved === 1 ? '' : 's'} añadido${saved === 1 ? '' : 's'} a la rutina fija`); }
-  else { S.exIdx++; renderWorkout(); }
+  S.exIdx++; renderWorkout(); scheduleBackup(true);                           // sesión completada: respaldo inmediato
+}
+/* Comprueba que la serie se escribió de verdad (IndexedDB o servidor) releyéndola, con los valores esperados. */
+async function verifySetWritten(saved, body) {
+  const id = Number(saved && saved.id);
+  if (MODE.local) {
+    let rec = null;
+    if (STORE.ok) rec = await idbRead('sets', id);
+    else { try { rec = (JSON.parse(localStorage.getItem(LS_KEY)).sets || []).find(x => x.id === id); } catch (e) {} }
+    return !!rec && rec.day === body.day && rec.exercise_id === body.exercise_id && rec.set_no === body.set_no && rec.kg === body.kg && rec.reps === body.reps && rec.rir === body.rir;
+  }
+  const w = await api(`/workout?day=${body.day}&at=${sessAt()}&extra=${body.exercise_id}`);
+  const e = w.exercises.find(x => Number(x.id) === body.exercise_id), rec = e && e.today.find(x => Number(x.set_no) === body.set_no);
+  return !!rec && Number(rec.kg) === body.kg && Number(rec.reps) === body.reps && Number(rec.rir) === body.rir;
 }
 async function saveSet(n) {
   const ex = curEx(), r = ex && ex.rows[n - 1]; if (!r) return;
   if (r.done && !r.dirty) {                                   // pulsar una serie ya guardada la desmarca (borra)
     await deleteSet(n); return;
   }
-  const kg = num(r.kg), reps = Math.round(num(r.reps)), rir = Math.round(num(r.rir));
-  if (!(kg >= 0) || !(reps > 0) || isNaN(rir) || rir < 0) { toast('Rellena kg, reps y RIR', true); return; }
-  const saved = await post('/sets', { day: S.day, exercise_id: ex.id, set_no: n, kg, reps, rir, at: markSession() });
+  const kg = Number(num(r.kg)), reps = Math.round(Number(num(r.reps))), rir = Math.round(Number(num(r.rir)));
+  if (!(kg >= 0) || !(reps > 0) || !Number.isFinite(rir) || rir < 0) { toast('Rellena kg, reps y RIR', true); return; }
+  const body = { day: S.day, exercise_id: Number(ex.id), set_no: Number(n), kg, reps, rir };   // tipos numéricos puros
+  let saved = null, lastErr = null;
+  for (let attempt = 1; attempt <= 3 && !saved; attempt++) {
+    try {
+      const res = await post('/sets', { ...body, at: markSession() });
+      if (await verifySetWritten(res, body)) saved = res; else lastErr = new Error('la serie no aparece al releerla de la base de datos');
+    } catch (e) { lastErr = e; }
+    if (!saved && attempt < 3) await new Promise(ok => setTimeout(ok, 200 * attempt));
+  }
+  if (!saved) { toast(`⚠️ No se pudo guardar la serie ${n}: ${lastErr ? lastErr.message : 'error desconocido'}. Inténtalo de nuevo.`, true); return; }   // la casilla NO se marca
+  saved = { ...saved, id: Number(saved.id), exercise_id: Number(saved.exercise_id), set_no: Number(saved.set_no), kg: Number(saved.kg), reps: Number(saved.reps), rir: Number(saved.rir), nai_mod: Number(saved.nai_mod) || 0 };
   ex.today = ex.today.filter(s => s.set_no !== n).concat(saved).sort((a, b) => a.set_no - b.set_no);
-  r.setId = saved.id; r.done = true; r.dirty = false; r.touched = true;
+  r.done = true; r.dirty = false; r.touched = true;
   ex.rows.forEach((x, i) => { if (i + 1 > n && !x.done && !x.touched && !x.sug) x.kg = String(kg); });   // sin referencia previa: arrastra el peso
-  renderWorkout();
+  syncSets(); renderWorkout(); scheduleBackup(); emitStateChange({ scope: 'sets' });
   toast(`✓ Serie ${n} guardada · e1RM puro ${fmt(e1rm(kg, reps, rir) / (1 + (saved.nai_mod || 0)))} kg`);
 }
 function goEx(i) { S.exIdx = i; renderWorkout(); }
-function addSet() {
+async function addSet() {
   const ex = curEx(); if (!ex || ex.rows.length >= 12) return;
   ex.rows.push(rowFor(ex, ex.rows.length + 1)); renderWorkout();
+  await offerSetsPersist(ex);
 }
 async function deleteSet(n) {
-  const ex = curEx(), row = ex && ex.rows[n - 1], old = ex && ex.today.find(s => s.set_no === n) || (row && row.setId ? { id: row.setId, day: S.day, exercise_id: ex.id, set_no: n, kg: num(row.kg) || 0, reps: Math.round(num(row.reps) || ex.target_reps), rir: Math.round(num(row.rir) || 0) } : null); if (!ex || !row) return;
-  if (!old) { row.kg = ''; row.reps = String(seriesTargets(ex).reps[n - 1] || ex.target_reps); row.rir = String(seriesTargets(ex).rir[n - 1] ?? ex.target_rir); row.done = false; row.dirty = false; row.touched = false; row.sug = null; renderWorkout(); toast(`Serie ${n} vaciada`); return; }
-  await api('/sets/' + old.id, { method: 'DELETE' }); ex.today = ex.today.filter(s => String(s.id) !== String(old.id)); row.setId = null;
-  row.kg = ''; row.reps = String(seriesTargets(ex).reps[n - 1] || ex.target_reps); row.rir = String(seriesTargets(ex).rir[n - 1] ?? ex.target_rir); row.done = false; row.dirty = false; row.touched = false; row.sug = null; renderWorkout();
-  toast(`Serie ${n} eliminada`, null, async () => { await post('/sets', { day: old.day, exercise_id: old.exercise_id, set_no: old.set_no, kg: old.kg, reps: old.reps, rir: old.rir, at: markSession() }); await loadWorkout(); });
+  const ex = curEx(), old = ex && ex.today.find(s => s.set_no === n); if (!ex) return;
+  if (!old) {                                                  // fila vacía: si es la última, se quita y se ofrece actualizar la rutina
+    if (n === ex.rows.length && ex.rows.length > 1) { ex.rows.pop(); renderWorkout(); await offerSetsPersist(ex); }
+    else { ex.rows[n - 1].done = false; renderWorkout(); }
+    return;
+  }
+  await api('/sets/' + old.id, { method: 'DELETE' }); ex.today = ex.today.filter(s => s.id !== old.id); ex.rows[n - 1].done = false;
+  syncSets(); renderWorkout(); scheduleBackup(); emitStateChange({ scope: 'sets' });
+  toast(`Serie ${n} eliminada`, null, async () => { await post('/sets', { day: old.day, exercise_id: Number(old.exercise_id), set_no: Number(old.set_no), kg: Number(old.kg), reps: Number(old.reps), rir: Number(old.rir), at: markSession() }); await loadWorkout(true); scheduleBackup(); emitStateChange({ scope: 'sets' }); });
 }
- 
+
+/* ================= estado reactivo (fuente única: S.routine / S.sets) =================
+   Cualquier cambio de serie, ejercicio o peso pasa por emitStateChange(): recarga lo necesario y
+   vuelve a pintar Inicio y Entrenar al instante, sin recargar la página. */
+function syncSets() { S.sets = ((S.workout && S.workout.exercises) || []).flatMap(e => e.today); }
+let _stateJob = Promise.resolve();
+function emitStateChange(detail = {}) {
+  _stateJob = _stateJob.then(() => applyState(detail)).catch(e => toast(e.message, true));
+  document.dispatchEvent(new CustomEvent('nutrifit:state', { detail }));
+  return _stateJob;
+}
+async function applyState(d) {
+  const scope = d.scope || 'all';
+  if (scope === 'routine' || scope === 'all') { S.routine = await api('/routine'); await loadWorkout(true); }
+  else if (scope === 'weight') await loadWeights();
+  else if (scope === 'food') await loadFoods();
+  syncSets(); renderSummary();
+  if (scope === 'routine' || scope === 'all' || S.routine.length) renderRoutine();
+  if (scope !== 'sets') renderWorkout();                       // con 'sets' Inicio ya se repintó: no pisar lo que se está escribiendo
+  if (S.tab === 'train') await drawWeekly();
+  if (S.tab === 'nutri') await loadNutri();
+}
+
 /* ================= carga de datos ================= */
 async function loadWeights() { try { S.weights = await api('/weights'); } catch (e) {} renderSummary(); }
 async function loadFoods() { S.foods = await api('/foods?day=' + S.day); renderSummary(); }
-async function loadWorkout() { S.workout = await api('/workout?day=' + S.day + '&at=' + sessAt() + (S.extraIds.length ? '&extra=' + S.extraIds.join(',') : '')); S.settings.level = S.workout.level; S.nai = S.workout.nai; pickStartExercise(); renderWorkout(); }
+async function loadWorkout(keep) {
+  const keepId = keep && curEx() ? curEx().id : null;           // conserva el ejercicio que se está viendo
+  S.workout = await api('/workout?day=' + S.day + '&at=' + sessAt() + (S.extraIds.length ? '&extra=' + S.extraIds.join(',') : ''));
+  S.settings.level = S.workout.level; S.nai = S.workout.nai; pickStartExercise();
+  if (keepId !== null) { const i = S.workout.exercises.findIndex(e => e.id === keepId); if (i >= 0) S.exIdx = i; }
+  syncSets(); renderWorkout();
+}
 /* Recalcula el NAI (nueva comida, comida borrada, paso del tiempo) y refresca las cargas recomendadas sin pisar lo que el usuario ya ha tocado. */
 async function refreshNai() {
   if (!S.workout) return;
@@ -1269,12 +1550,7 @@ function renderNutri() {
  
 /* ================= ENTRENAMIENTO ================= */
 async function loadTrain() {
-  let routine = await api('/routine');
-  const loose = routine.filter(e => e.weekday < 0), wd = wdIndex(S.day);
-  for (const ex of loose) {
-    await post('/routine/' + ex.id, { weekday: wd, name: ex.name, muscle: ex.muscle, kind: ex.kind, sets: ex.sets, target_reps: ex.target_reps, target_rir: ex.target_rir }, 'PUT');
-  }
-  S.routine = loose.length ? await api('/routine') : routine;
+  S.routine = await api('/routine');
   renderRoutine(); await drawWeekly();
 }
 /* Gráfico semanal: score diario (lun–sáb) de esta semana vs la anterior. */
@@ -1338,6 +1614,7 @@ function toggleDay(wd) {
 function renderRoutine() {
   const todayWd = wdIndex(S.day);
   const order = [todayWd, ...[0,1,2,3,4,5,6].filter(i => i !== todayWd)];
+  const extras = S.routine.filter(e => e.weekday < 0);
   $('#routineList').innerHTML = order.map(wd => {
     const list = S.routine.filter(e => e.weekday === wd);
     const col = isDayCollapsed(wd);
@@ -1353,7 +1630,13 @@ function renderRoutine() {
           <button class="btn sm" data-act="editex" data-id="${e.id}">✏️</button>
           <button class="trash" style="width:34px;height:34px;font-size:15px" data-act="delex" data-id="${e.id}">🗑</button></div></div>`).join('')
         : '<div class="empty">Descanso</div>'}</div></div></div>`;
-  }).join('');
+  }).join('') + (extras.length ? extrasCard(extras) : '');
+}
+function extrasCard(list) {
+  return `<div class="card"><h3>Ejercicios extra <small>(añadidos fuera de rutina)</small></h3>${list.map(e => `<div class="item"><div class="t"><div class="n">${esc(e.name)}</div>
+    <div class="m">${esc(e.muscle)} · ${e.sets} × ${e.target_reps} · RIR ${e.target_rir} · ${e.kind}</div></div>
+    <button class="btn sm" data-act="editex" data-id="${e.id}">✏️</button>
+    <button class="trash" style="width:34px;height:34px;font-size:15px" data-act="delex" data-id="${e.id}">🗑</button></div>`).join('')}</div>`;
 }
 function openEx(ex, wd) {
   $('#exTitle').textContent = ex ? 'Editar ejercicio' : 'Nuevo ejercicio';
@@ -1371,7 +1654,7 @@ function openEx(ex, wd) {
 function fillSettings() {
   const s = S.settings;
   $('#sKcal').value = s.kcal; $('#sP').value = s.protein; $('#sC').value = s.carbs; $('#sF').value = s.fat; $('#sLevel').value = s.level; $('#sTol').value = s.tolerance || 'media';
-  updKcalCalc(); fillProfile(); fillTZ();
+  updKcalCalc(); fillProfile(); fillTZ(); fillBackupInfo();
 }
 
 /* ----- zona horaria ----- */
@@ -1736,7 +2019,11 @@ document.addEventListener('click', async e => {
       case 'saveset': await saveSet(+d.n); break;
       case 'deleteset': await deleteSet(+d.n); break;
       case 'fillsug': { const r = curEx().rows[+d.n - 1]; r.kg = String(r.sug.kg); r.touched = true; if (r.done) r.dirty = true; renderWorkout(); break; }
-      case 'addset': addSet(); break;
+      case 'addset': await addSet(); break;
+      case 'editcur': if (curEx()) openEx(curEx()); break;
+      case 'delcur': await deleteCurrentExercise(); break;
+      case 'exportbk': await exportBackup(); break;
+      case 'restoreauto': await restoreAuto(); break;
       case 'addex': await openAddEx(); break;
       case 'addweight': await openWeight(); break;
       case 'pickex': await addExtra(+d.id); break;
@@ -1750,11 +2037,11 @@ document.addEventListener('click', async e => {
       case 'togglemeal': toggleMeal(d.mealKey); break;
       case 'undo': if (undoAction) { const u = undoAction; undoAction = null; $('#toast').style.display = 'none'; await u(); } break;
       case 'saveweight': { const kg = num($('#wKg').value); if (isNaN(kg)) { toast('Introduce tu peso', true); break; }
-        await post('/weights', { day: S.day, kg }); toast('Peso guardado'); await loadNutri(); await loadWeights(); break; }
+        await post('/weights', { day: S.day, kg }); toast('Peso guardado'); await emitStateChange({ scope: 'weight' }); scheduleBackup(); break; }
       case 'newex': openEx(null, d.wd !== undefined ? +d.wd : undefined); break;
       case 'editex': openEx(S.routine.find(x => x.id === +d.id)); break;
-      case 'delex': if (confirm('¿Eliminar este ejercicio y todo su historial?')) { const old = S.routine.find(x => String(x.id) === String(d.id)); if (old) await api('/routine/' + d.id, { method: 'DELETE' }); await loadTrain(); await loadWorkout(); toast('Ejercicio eliminado', null, old ? async () => { await post('/routine', old); await loadTrain(); await loadWorkout(); } : null); } break;
-      case 'movex': await post(`/routine/${d.id}/move`, { dir: +d.dir }); await loadTrain(); await loadWorkout(); break;
+      case 'delex': if (confirm('¿Eliminar este ejercicio y todo su historial?')) { const old = S.routine.find(x => String(x.id) === String(d.id)); if (old) await api('/routine/' + d.id, { method: 'DELETE' }); S.extraIds = S.extraIds.filter(i => String(i) !== String(d.id)); await emitStateChange({ scope: 'routine' }); scheduleBackup(); toast('Ejercicio eliminado', null, old ? async () => { await post('/routine', old); await emitStateChange({ scope: 'routine' }); } : null); } break;
+      case 'movex': await post(`/routine/${d.id}/move`, { dir: +d.dir }); await emitStateChange({ scope: 'routine' }); break;
       case 'toggleday': toggleDay(+d.wd); break;
       case 'opendata': openData(); break;
       case 'dscope': DM.scope = d.v; updDataPreview(); break;
@@ -1783,6 +2070,14 @@ document.addEventListener('click', async e => {
   } catch (err) { toast(err.message, true); }
 });
  
+$('#bkFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const payload = JSON.parse(await f.text());
+    if (!confirm('Se reemplazarán los datos actuales por los de la copia «' + f.name + '». Antes se guardará un respaldo del estado actual. ¿Continuar?')) return;
+    await importBackup(payload); toast('Copia restaurada ✓');
+  } catch (err) { toast(err instanceof SyntaxError ? 'El archivo no es un JSON válido' : err.message, true); }
+});
 $('#sTz').addEventListener('change', async () => {
   try { localStorage.setItem(TZ_KEY, $('#sTz').value); } catch (e) {}
   updTz(); await init(); toast('Zona horaria actualizada: ' + nowHM());
@@ -1833,8 +2128,7 @@ $('#wForm').addEventListener('submit', async e => {
   if (isNaN(kg) || kg < 20 || kg > 400) { toast('Introduce un peso válido (20-400 kg)', true); return; }
   try {
     await post('/weights', { day, kg });
-    $('#weightSheet').hidden = true; toast(`⚖️ Peso guardado: ${fmt(kg)} kg`); await loadWeights();
-    if (S.tab === 'nutri' && S.nutView === 'week') await loadNutri();
+    $('#weightSheet').hidden = true; toast(`⚖️ Peso guardado: ${fmt(kg)} kg`); await emitStateChange({ scope: 'weight' }); scheduleBackup();
   } catch (err) { toast(err.message, true); }
 });
 $('#axq').addEventListener('input', () => { $('#axForm').hidden = true; renderAx(); });
@@ -1855,9 +2149,10 @@ $('#exForm').addEventListener('submit', async e => {
   if (!body.name) { toast('Pon un nombre al ejercicio', true); return; }
   try {
     const id = $('#exId').value;
-    if (id) await post('/routine/' + id, body, 'PUT'); else await post('/routine', body);
-    const savedId = id || (await api('/routine')).slice(-1)[0]?.id; const cfg = readSeriesCfg('ex'); if (savedId) saveSeriesTargets(savedId, cfg.reps || [], cfg.rir || []);
-    $('#exSheet').hidden = true; toast('Ejercicio guardado ✓'); await loadTrain(); await loadWorkout();
+    const created = id ? null : await post('/routine', body);
+    if (id) await post('/routine/' + id, body, 'PUT');
+    const savedId = id || (created && created.id); const cfg = readSeriesCfg('ex'); if (savedId) saveSeriesTargets(Number(savedId), cfg.reps || [], cfg.rir || []);
+    $('#exSheet').hidden = true; toast('Ejercicio guardado ✓'); await emitStateChange({ scope: 'routine' }); scheduleBackup();
   } catch (err) { toast(err.message, true); }
 });
  
@@ -1873,8 +2168,10 @@ async function init() {
   S.day = todayStr(); S.nutDay = S.day;
   try {
     await detectMode();
+    if (MODE.local) await loadStorage();                       // IndexedDB (con migración desde localStorage)
+    requestPersistence();                                      // navigator.storage.persist()
     $('#modeNote').textContent = MODE.local
-      ? '💾 Modo local: sin servidor Flask, tus datos se guardan en este navegador.'
+      ? '💾 Modo local: sin servidor Flask, tus datos se guardan en este navegador (IndexedDB).'
       : 'NutriFit · tus datos se guardan en tu servidor';
     S.settings = await api('/settings');
     await Promise.all([loadFoods(), loadWorkout(), loadWeights()]);
