@@ -1146,9 +1146,16 @@ function renderAx() {
 function showNewExtra() { $('#axName').value = $('#axq').value.trim(); $('#axForm').hidden = false; renderSeriesCfg('ax', $('#axSets').value, [], []); $('#axName').focus(); }
 async function addExtra(id) {
   if (!S.extraIds.includes(id)) S.extraIds.push(id);
+  const routine = await api('/routine'), ex = routine.find(x => String(x.id) === String(id));
+  if (!ex) throw new Error('No se encontró el ejercicio seleccionado');
+  const wd = wdIndex(S.day);
+  if (ex.weekday !== wd) {
+    await post('/routine/' + id, { weekday: wd, name: ex.name, muscle: ex.muscle, kind: ex.kind, sets: ex.sets, target_reps: ex.target_reps, target_rir: ex.target_rir }, 'PUT');
+  }
+  S.extraIds = S.extraIds.filter(x => String(x) !== String(id));
   await loadWorkout();
   S.exIdx = Math.max(0, S.workout.exercises.findIndex(e => e.id === id)); renderWorkout();
-  $('#addExSheet').hidden = true; toast('Ejercicio añadido al entreno de hoy');
+  $('#addExSheet').hidden = true; toast('Ejercicio añadido a la rutina fija de ' + DAYS_FULL[wd]);
 }
 async function persistExtraExercises() {
   const ids = [...new Set(S.extraIds || [])]; if (!ids.length) return 0;
@@ -1188,9 +1195,10 @@ function addSet() {
   ex.rows.push(rowFor(ex, ex.rows.length + 1)); renderWorkout();
 }
 async function deleteSet(n) {
-  const ex = curEx(), old = ex && ex.today.find(s => s.set_no === n); if (!ex) return;
-  if (!old) { ex.rows[n - 1].done = false; renderWorkout(); return; }
-  await api('/sets/' + old.id, { method: 'DELETE' }); ex.today = ex.today.filter(s => s.id !== old.id); ex.rows[n - 1].done = false; renderWorkout();
+  const ex = curEx(), old = ex && ex.today.find(s => s.set_no === n), row = ex && ex.rows[n - 1]; if (!ex || !row) return;
+  if (!old) { row.kg = ''; row.reps = String(seriesTargets(ex).reps[n - 1] || ex.target_reps); row.rir = String(seriesTargets(ex).rir[n - 1] ?? ex.target_rir); row.done = false; row.dirty = false; row.touched = false; row.sug = null; renderWorkout(); toast(`Serie ${n} vaciada`); return; }
+  await api('/sets/' + old.id, { method: 'DELETE' }); ex.today = ex.today.filter(s => String(s.id) !== String(old.id));
+  row.kg = ''; row.reps = String(seriesTargets(ex).reps[n - 1] || ex.target_reps); row.rir = String(seriesTargets(ex).rir[n - 1] ?? ex.target_rir); row.done = false; row.dirty = false; row.touched = false; row.sug = null; renderWorkout();
   toast(`Serie ${n} eliminada`, null, async () => { await post('/sets', { day: old.day, exercise_id: old.exercise_id, set_no: old.set_no, kg: old.kg, reps: old.reps, rir: old.rir, at: markSession() }); await loadWorkout(); });
 }
  
