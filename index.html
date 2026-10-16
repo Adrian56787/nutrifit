@@ -1055,7 +1055,7 @@ const curEx = () => S.workout && S.workout.exercises[S.exIdx];
 function rowFor(ex, n) {
   const targets = seriesTargets(ex), targetReps = targets.reps[n - 1] || ex.target_reps, targetRir = targets.rir[n - 1] ?? ex.target_rir;
   const done = ex.today.find(s => s.set_no === n), sug = getSuggestion(ex, n);
-  if (done) return { kg: String(done.kg), reps: String(done.reps), rir: String(done.rir), sug, done: true, dirty: false, touched: true };
+  if (done) return { kg: String(done.kg), reps: String(done.reps), rir: String(done.rir), setId: done.id, sug, done: true, dirty: false, touched: true };
   const prevRow = ex.rows[n - 2];
   return { kg: sug ? String(sug.kg) : prevRow ? prevRow.kg : '', reps: String(targetReps), rir: String(targetRir), sug, done: false, dirty: false, touched: false };
 }
@@ -1184,7 +1184,7 @@ async function saveSet(n) {
   if (!(kg >= 0) || !(reps > 0) || isNaN(rir) || rir < 0) { toast('Rellena kg, reps y RIR', true); return; }
   const saved = await post('/sets', { day: S.day, exercise_id: ex.id, set_no: n, kg, reps, rir, at: markSession() });
   ex.today = ex.today.filter(s => s.set_no !== n).concat(saved).sort((a, b) => a.set_no - b.set_no);
-  r.done = true; r.dirty = false; r.touched = true;
+  r.setId = saved.id; r.done = true; r.dirty = false; r.touched = true;
   ex.rows.forEach((x, i) => { if (i + 1 > n && !x.done && !x.touched && !x.sug) x.kg = String(kg); });   // sin referencia previa: arrastra el peso
   renderWorkout();
   toast(`✓ Serie ${n} guardada · e1RM puro ${fmt(e1rm(kg, reps, rir) / (1 + (saved.nai_mod || 0)))} kg`);
@@ -1195,9 +1195,9 @@ function addSet() {
   ex.rows.push(rowFor(ex, ex.rows.length + 1)); renderWorkout();
 }
 async function deleteSet(n) {
-  const ex = curEx(), old = ex && ex.today.find(s => s.set_no === n), row = ex && ex.rows[n - 1]; if (!ex || !row) return;
+  const ex = curEx(), row = ex && ex.rows[n - 1], old = ex && ex.today.find(s => s.set_no === n) || (row && row.setId ? { id: row.setId, day: S.day, exercise_id: ex.id, set_no: n, kg: num(row.kg) || 0, reps: Math.round(num(row.reps) || ex.target_reps), rir: Math.round(num(row.rir) || 0) } : null); if (!ex || !row) return;
   if (!old) { row.kg = ''; row.reps = String(seriesTargets(ex).reps[n - 1] || ex.target_reps); row.rir = String(seriesTargets(ex).rir[n - 1] ?? ex.target_rir); row.done = false; row.dirty = false; row.touched = false; row.sug = null; renderWorkout(); toast(`Serie ${n} vaciada`); return; }
-  await api('/sets/' + old.id, { method: 'DELETE' }); ex.today = ex.today.filter(s => String(s.id) !== String(old.id));
+  await api('/sets/' + old.id, { method: 'DELETE' }); ex.today = ex.today.filter(s => String(s.id) !== String(old.id)); row.setId = null;
   row.kg = ''; row.reps = String(seriesTargets(ex).reps[n - 1] || ex.target_reps); row.rir = String(seriesTargets(ex).rir[n - 1] ?? ex.target_rir); row.done = false; row.dirty = false; row.touched = false; row.sug = null; renderWorkout();
   toast(`Serie ${n} eliminada`, null, async () => { await post('/sets', { day: old.day, exercise_id: old.exercise_id, set_no: old.set_no, kg: old.kg, reps: old.reps, rir: old.rir, at: markSession() }); await loadWorkout(); });
 }
@@ -1269,7 +1269,12 @@ function renderNutri() {
  
 /* ================= ENTRENAMIENTO ================= */
 async function loadTrain() {
-  S.routine = await api('/routine');
+  let routine = await api('/routine');
+  const loose = routine.filter(e => e.weekday < 0), wd = wdIndex(S.day);
+  for (const ex of loose) {
+    await post('/routine/' + ex.id, { weekday: wd, name: ex.name, muscle: ex.muscle, kind: ex.kind, sets: ex.sets, target_reps: ex.target_reps, target_rir: ex.target_rir }, 'PUT');
+  }
+  S.routine = loose.length ? await api('/routine') : routine;
   renderRoutine(); await drawWeekly();
 }
 /* Gráfico semanal: score diario (lun–sáb) de esta semana vs la anterior. */
@@ -1333,7 +1338,6 @@ function toggleDay(wd) {
 function renderRoutine() {
   const todayWd = wdIndex(S.day);
   const order = [todayWd, ...[0,1,2,3,4,5,6].filter(i => i !== todayWd)];
-  const extras = S.routine.filter(e => e.weekday < 0);
   $('#routineList').innerHTML = order.map(wd => {
     const list = S.routine.filter(e => e.weekday === wd);
     const col = isDayCollapsed(wd);
@@ -1349,13 +1353,7 @@ function renderRoutine() {
           <button class="btn sm" data-act="editex" data-id="${e.id}">✏️</button>
           <button class="trash" style="width:34px;height:34px;font-size:15px" data-act="delex" data-id="${e.id}">🗑</button></div></div>`).join('')
         : '<div class="empty">Descanso</div>'}</div></div></div>`;
-  }).join('') + (extras.length ? extrasCard(extras) : '');
-}
-function extrasCard(list) {
-  return `<div class="card"><h3>Ejercicios extra <small>(añadidos fuera de rutina)</small></h3>${list.map(e => `<div class="item"><div class="t"><div class="n">${esc(e.name)}</div>
-    <div class="m">${esc(e.muscle)} · ${e.sets} × ${e.target_reps} · RIR ${e.target_rir} · ${e.kind}</div></div>
-    <button class="btn sm" data-act="editex" data-id="${e.id}">✏️</button>
-    <button class="trash" style="width:34px;height:34px;font-size:15px" data-act="delex" data-id="${e.id}">🗑</button></div>`).join('')}</div>`;
+  }).join('');
 }
 function openEx(ex, wd) {
   $('#exTitle').textContent = ex ? 'Editar ejercicio' : 'Nuevo ejercicio';
